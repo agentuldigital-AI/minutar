@@ -1,0 +1,22 @@
+{
+  "_comment": "Reference snippet — the tracker's Claude Code hooks (M4, decision #7). Installed 2026-07-07 by merging into ~/.claude/settings.json (user scope, applies to every project; backup kept as settings.json.bak-before-tracker-2026-07-07). Events fire-and-forget the raw hook JSON to the daemon; hook_event_name distinguishes them. UserPromptSubmit/Notification also mark the session as last-interacted for the attention metric.",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "curl.exe -s --max-time 2 -X POST -H \"Content-Type: application/json\" --data-binary @- http://127.0.0.1:5601/claude/event",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "SessionStart": "same command",
+    "UserPromptSubmit": "same command",
+    "Stop": "same command",
+    "SessionEnd": "same command",
+    "Notification": "same command"
+  }
+}

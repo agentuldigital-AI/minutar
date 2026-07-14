@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ro">
+<head>
+  <meta charset="utf-8" />
+  <title>Minutar Reporter — profil</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 460px; margin: 2rem auto; color: #222; }
+    label { display: block; font-weight: 600; margin-bottom: .4rem; }
+    input { width: 100%; padding: .5rem; font-size: 1rem; box-sizing: border-box; }
+    button { margin-top: .8rem; padding: .5rem 1.2rem; font-size: 1rem; cursor: pointer; }
+    .hint { color: #666; font-size: .85rem; margin-top: .8rem; line-height: 1.4; }
+    #status { color: #2e7d32; margin-left: .6rem; }
+  </style>
+</head>
+<body>
+  <h2>Eticheta acestui profil de browser</h2>
+  <label for="label">Profil (ex. „munca", „personal")</label>
+  <input id="label" placeholder="numele profilului pentru atribuire" />
+  <button id="save">Salvează</button><span id="status"></span>
+  <p class="hint">
+    Eticheta se salvează în <code>chrome.storage.local</code> — per profil, fără sincronizare.
+    Pune aceeași valoare în <code>browser_profiles</code> la proiectul potrivit din
+    pagina de Setări a dashboard-ului: toate taburile din acest profil se vor contoriza pe acel proiect
+    (decizia #12).
+  </p>
+</body>
+<script src="options.js"></script>
+</html>

@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Minutar Reporter",
+  "version": "0.2.0",
+  "description": "Reports tab activity (url/title/audible/YouTube channel/profile) to the local Minutar daemon. Localhost only, no cloud.",
+  "permissions": ["tabs", "storage", "alarms"],
+  "host_permissions": ["http://127.0.0.1:5601/*"],
+  "background": {
+    "service_worker": "sw.js"
+  },
+  "options_page": "options.html",
+  "content_scripts": [
+    {
+      "matches": ["*://*.youtube.com/*"],
+      "js": ["content-youtube.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -1,0 +1,180 @@
+# Minutar — șablonul de configurare (sursa unică de adevăr pentru toate componentele).
+# La prima instalare, scripts/install.ps1 copiază acest fișier în
+#   %LOCALAPPDATA%\TimeTracker\tracker.toml
+# — ACELA e fișierul viu (hot-reload în ~1s). Editează-l de acolo sau, mai simplu,
+# din pagina de Setări a dashboard-ului (http://localhost:5601). Upgrade-urile nu îl ating.
+
+[server]
+aw_url      = "http://localhost:5601"
+bridge_port = 5601
+bucket_host = ""
+
+[storage]
+db_path    = ""
+tee_aw_url = ""
+
+[afk]
+timeout_seconds = 180
+poll_seconds    = 5
+
+[window]
+poll_seconds      = 1
+pulsetime_seconds = 5
+
+[browser]
+heartbeat_seconds = 60
+pulsetime_seconds = 90
+processes         = ["chrome.exe", "msedge.exe"]
+
+[claude]
+# gol = implicit %USERPROFILE%\.claude\projects (fallback-ul jsonl pentru Claude Code)
+projects_dir                = ''
+desktop_processes           = ["Claude.exe"]
+work_pulsetime_seconds      = 150
+attention_pulsetime_seconds = 15
+jsonl_fallback              = true
+
+[popup]
+grace_seconds            = 300
+postpone_options_minutes = [5, 15, 30]
+renag_minutes_default    = 10
+sure_cooldown_minutes    = 60
+quiet_hours              = ["22:30-08:00"]
+
+[video]
+audible_focused_counts_active = true
+
+[attribution]
+hold_seconds = 15
+
+[supervisor]
+aw_server_exe = ''
+watcher_exe   = ''
+daemon_exe    = ''
+check_seconds = 10
+
+[goals]
+streak_productive_minutes = 60
+
+[focus]
+grace_seconds     = 30
+countdown_seconds = 10
+close_apps        = false
+close_tabs        = false
+default_minutes   = 25
+never_close       = ["explorer.exe"]
+
+[profile]
+why               = ""
+motivation_styles = []
+dislikes          = []
+work_start        = "09:00"
+work_end          = "18:00"
+lunch             = "13:00"
+work_weekends     = false
+focus_intervals   = []
+
+[coach]
+enabled                    = true
+min_minutes_between_nudges = 20
+rule_cooldown_minutes      = 90
+flow_minutes               = 20
+toast_seconds              = 8
+rule_unproductive          = true
+unproductive_minutes       = 15
+rule_context_switching     = true
+max_switches_per_hour      = 60
+rule_main_not_started      = false
+main_project_check_at      = "11:00"
+rule_no_break              = true
+no_break_hours             = 2
+rule_deadline_drift        = false
+deadline_drift_days        = 3
+
+# --- Proiectele tale: adaugă câte un bloc [[projects]] per proiect ------------------
+# keywords         = cuvinte din titlul ferestrei care atribuie timpul pe proiect
+# claude_dirs      = folderele în care rulezi Claude Code pentru acest proiect
+# browser_profiles = eticheta profilului de browser (setată în opțiunile extensiei)
+# apps / domains   = aplicații (exe) și domenii dedicate acestui proiect
+
+[[projects]]
+name             = "Exemplu Proiect"
+keywords         = ["exemplu"]
+claude_dirs      = []
+browser_profiles = []
+apps             = []
+domains          = []
+
+# --- Clasificare: productiv / neutru / neproductiv ----------------------------------
+# Regulile se evaluează app → domain → title (pentru browsere: domain întâi).
+# Butonul „Marchează productiv" de pe popup scrie tot aici.
+
+[classification]
+default = "neutral"
+
+[[classification.rules]]
+class = "unproductive"
+match = "domain"
+value = "youtube.com"
+
+[[classification.rules]]
+class = "unproductive"
+match = "domain"
+value = "netflix.com"
+
+[[classification.rules]]
+class = "unproductive"
+match = "domain"
+value = "facebook.com"
+
+[[classification.rules]]
+class = "unproductive"
+match = "domain"
+value = "instagram.com"
+
+[[classification.rules]]
+class = "unproductive"
+match = "domain"
+value = "tiktok.com"
+
+[[classification.rules]]
+class = "unproductive"
+match = "domain"
+value = "reddit.com"
+
+[[classification.rules]]
+class = "productive"
+match = "domain"
+value = "github.com"
+
+[[classification.rules]]
+class = "productive"
+match = "domain"
+value = "stackoverflow.com"
+
+[[classification.rules]]
+class = "productive"
+match = "domain"
+value = "docs.google.com"
+
+[[classification.rules]]
+class = "productive"
+match = "domain"
+value = "localhost"
+
+[[classification.rules]]
+class = "productive"
+match = "app"
+value = "Code.exe"
+
+[[classification.rules]]
+class = "productive"
+match = "app"
+value = "Claude.exe"
+
+# --- Excepții YouTube: conținut educațional care NU declanșează popup-ul -------------
+# title_keywords = cuvinte din titlul video-ului; channels = numele exact al canalului
+
+[youtube_exceptions]
+title_keywords = ["tutorial", "curs", "documentar", "documentary", "course"]
+channels       = []

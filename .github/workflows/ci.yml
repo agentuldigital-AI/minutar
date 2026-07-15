@@ -1,0 +1,34 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Dashboard typecheck + build
+        working-directory: src/dashboard
+        run: |
+          npm ci
+          npm run typecheck
+          npm run build
+      - name: Extensie typecheck + build
+        working-directory: src/extension
+        run: |
+          npm ci
+          npm run typecheck
+          npm run build
+      - name: Build + teste .NET
+        run: |
+          dotnet build Minutar.sln -c Release
+          dotnet test src/Tracker.Tests -c Release --no-build

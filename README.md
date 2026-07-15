@@ -30,8 +30,13 @@ distrageri. Datele nu părăsesc NICIODATĂ calculatorul tău — vezi [PRIVACY.
 
 ## Instalare (deocamdată din sursă — instalator simplu în lucru)
 
-Cerințe: Windows 10/11, [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0),
+Cerințe: Windows 10 (22H2) / Windows 11,
+[.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0),
 [Node.js LTS](https://nodejs.org) (doar pentru build-ul dashboard-ului/extensiei).
+
+> Vrei doar să FOLOSEȘTI aplicația, fără build din sursă? Descarcă `Minutar-Setup-x.y.z.exe`
+> din [Releases](https://github.com/agentuldigital-AI/minutar/releases) — instalează tot,
+> inclusiv .NET Runtime, fără alte cerințe.
 
 ```powershell
 git clone https://github.com/agentuldigital-AI/minutar.git

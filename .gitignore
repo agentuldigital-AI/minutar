@@ -19,3 +19,7 @@ config/backups/
 
 # transient Playwright MCP artifacts
 .playwright-mcp/
+
+# installer build artifacts
+installer/staging/
+installer/Output/

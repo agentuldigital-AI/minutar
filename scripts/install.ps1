@@ -6,7 +6,7 @@
 #   powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1
 #
 # What it does:
-#   1. Verifies .NET 8 SDK and ActivityWatch v0.13.2 are present.
+#   1. Verifies the .NET SDK is present.
 #   2. dotnet publish Watcher + Daemon to %LOCALAPPDATA%\time-tracker\bin.
 #   3. Registers scheduled tasks (at logon, highest privileges, restart on failure):
 #        TimeTracker-AwServer, TimeTracker-Watcher, TimeTracker-Daemon
@@ -44,11 +44,11 @@ if ($dotnet) {
     Write-Host "Set user env DOTNET_ROOT -> $env:DOTNET_ROOT"
 } else {
     $cmd = Get-Command dotnet -ErrorAction SilentlyContinue
-    if (-not $cmd) { throw ".NET SDK not found - see docs/SETUP.md" }
+    if (-not $cmd) { throw ".NET SDK not found - see README.md" }
     $dotnet = $cmd.Source
 }
 $sdks = & $dotnet --list-sdks 2>$null
-if (-not $sdks) { throw "dotnet at $dotnet has NO SDKs installed - see docs/SETUP.md" }
+if (-not $sdks) { throw "dotnet at $dotnet has NO SDKs installed - see README.md" }
 Write-Host "dotnet: $dotnet (SDK $(($sdks | Select-Object -First 1) -split ' ')[0])"
 
 # --- config: sursa de adevăr trăiește în %LOCALAPPDATA%\TimeTracker (2026-07-14) -----
@@ -62,19 +62,6 @@ if (-not (Test-Path $configPath)) {
     Write-Host "Config seeded: config\tracker.toml -> $configPath"
 } else {
     Write-Host "Config: $configPath (existent - editarile live se pastreaza)"
-}
-
-# aw-server is only needed while the shadow period is on (config: tee_aw_url set);
-# after the final retirement (tee_aw_url = "") the install has zero AW dependency.
-$teeActive = Select-String -Path $configPath -Pattern '^\s*tee_aw_url\s*=\s*"http' -Quiet
-if ($teeActive) {
-    $awServer = Join-Path $env:LOCALAPPDATA "Programs\ActivityWatch\aw-server\aw-server.exe"
-    if (-not (Test-Path $awServer)) {
-        throw "aw-server.exe not found at $awServer - shadow period needs it (docs/CUTOVER-2026-07-12.md)."
-    }
-    Write-Host "aw-server (shadow): $awServer"
-} else {
-    Write-Host "aw-server: not required (shadow retired)"
 }
 
 # --- 2. Publish (STAGED: live bin ramane intact daca publish-ul pica) --------
@@ -97,7 +84,7 @@ if ($task) {
     $task | Stop-ScheduledTask -ErrorAction SilentlyContinue
     $task | Disable-ScheduledTask | Out-Null
 }
-Get-Process Tracker.Supervisor, Tracker.Daemon, Tracker.Watcher, aw-server -ErrorAction SilentlyContinue |
+Get-Process Tracker.Supervisor, Tracker.Daemon, Tracker.Watcher -ErrorAction SilentlyContinue |
     Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 1
 
@@ -109,7 +96,7 @@ foreach ($proj in @("Tracker.Watcher", "Tracker.Daemon", "Tracker.Supervisor")) 
 Remove-Item -Recurse -Force $stageDir
 
 # --- 3. Scheduled task (M6): the SUPERVISOR owns everything else -------------
-# The supervisor starts and watchdogs aw-server + watcher + daemon (decision #10),
+# The supervisor starts and watchdogs the watcher + daemon (decision #10),
 # so a single elevated task is enough.
 if ($SkipTasks) {
     # publish disabled the existing task above — bring the stack back up

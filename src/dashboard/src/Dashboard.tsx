@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { assignClassForDay, assignMinutesForDay, assignToProject, assignToProjectForDay, fetchConfig, fetchDay, fetchReport, focusStart, focusStop, reclassify, removeDayAssignment, saveConfig, saveDay, unassignFromProject, type ConfigData, type DayAssignment, type DayState, type HeatmapRow, type NamedSeconds, type Report } from "./api";
+import { assignClassForDay, assignMinutesForDay, assignToProject, assignToProjectForDay, createProject, fetchClaudeCwds, fetchConfig, fetchDay, fetchReport, focusStart, focusStop, reclassify, removeDayAssignment, saveConfig, saveDay, unassignFromProject, type ConfigData, type DayAssignment, type DayState, type HeatmapRow, type NamedSeconds, type Report } from "./api";
 
 type Mode = "day" | "week" | "month";
 type ClassName = "productive" | "neutral" | "unproductive";
@@ -221,6 +221,17 @@ export default function Dashboard() {
     return [...names.values()];
   }, [cfgData, report]);
 
+  // proiectele „nesalvate" = venite doar din date (raportul le marchează cu configured:false),
+  // minus cele deja adoptate între timp. Selectarea lor cere adopție explicită.
+  const unsavedProjects = useMemo(() => {
+    const cfgNames = new Set((cfgData?.projects ?? []).map((p) => p.name.toLowerCase()));
+    return new Set(
+      (report?.byProject ?? [])
+        .filter((p) => p.configured === false && !cfgNames.has(p.name.toLowerCase()))
+        .map((p) => p.name.toLowerCase()),
+    );
+  }, [cfgData, report]);
+
   const dayDate = mode === "day"
     ? `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, "0")}-${String(from.getDate()).padStart(2, "0")}`
     : undefined;
@@ -424,6 +435,7 @@ export default function Dashboard() {
                   items={detail.apps}
                   current={cls}
                   projects={projectOptions}
+                  unsaved={unsavedProjects}
                   dayDate={dayDate}
                   cfg={cfgData}
                   allTotals={report.byApp}
@@ -437,6 +449,7 @@ export default function Dashboard() {
                   items={detail.domains}
                   current={cls}
                   projects={projectOptions}
+                  unsaved={unsavedProjects}
                   dayDate={dayDate}
                   cfg={cfgData}
                   allTotals={report.byDomain}
@@ -650,7 +663,16 @@ export default function Dashboard() {
                 className={`row two-series clickable ${projectFilter && !on ? "dim" : ""}`}
                 onClick={() => setProjectFilter(on ? null : p.name)}
               >
-                <span className="name">{p.name}</span>
+                <span className="name">
+                  {p.name}
+                  {unsavedProjects.has(p.name.toLowerCase()) && (
+                    <span
+                      className="day-chip"
+                      style={{ marginLeft: 6 }}
+                      title="Proiect dedus din numele folderului unei sesiuni Claude — nu există în config. Alege-l dintr-un dropdown de atribuire ca să-l creezi."
+                    >nesalvat</span>
+                  )}
+                </span>
                 <span
                   className="track"
                   title={`${p.name}: ${fmt(p.seconds)} — ${Math.round((p.seconds / projWindowTotal) * 100)}% din timpul atribuit` +
@@ -798,13 +820,15 @@ function TodayCard({ projects, todayKey }: { projects: string[]; todayKey?: stri
 }
 
 function ReclassList({
-  title, match, items, current, projects, onChanged, dayDate, cfg, allTotals, projectDetail, browserTotal, onTip,
+  title, match, items, current, projects, unsaved, onChanged, dayDate, cfg, allTotals, projectDetail, browserTotal, onTip,
 }: {
   title: string;
   match: "app" | "domain";
   items: NamedSeconds[];
   current: ClassName;
   projects: string[];
+  /** nume (lowercase) de proiecte care există doar în date, nu și în tracker.toml */
+  unsaved?: Set<string>;
   onChanged: () => void;
   /** yyyy-MM-dd — set only in day view; enables the "doar ziua asta" assignment group */
   dayDate?: string;
@@ -830,6 +854,11 @@ function ReclassList({
   // modal „împarte pe MINUTE" (click pe numele rândului, doar în day view): userul dă
   // doar minutele + proiect/clasă; serverul alege singur ferestrele reale de rulare
   const [splitAsk, setSplitAsk] = useState<string | null>(null);
+  // dialog de adopție: proiectele „nesalvate" (nume fabricat din folderul unei sesiuni
+  // Claude) trebuie create explicit în tracker.toml înainte de a fi folosite într-o regulă
+  const [adoptAsk, setAdoptAsk] = useState<{ value: string; proj: string; scope: "day" | "perm" } | null>(null);
+  const [adoptDir, setAdoptDir] = useState("");
+  const [adoptBusy, setAdoptBusy] = useState(false);
   const [spRows, setSpRows] = useState<{ min: string; proj: string; cls: string; reqId?: string }[]>([]);
   const [spErr, setSpErr] = useState("");
   const msgTimers = useRef<number[]>([]);
@@ -1023,6 +1052,37 @@ function ReclassList({
       .finally(() => setBusy(null));
   };
 
+  /** Proiect existent doar în date (fără intrare în tracker.toml) — vezi ReportService. */
+  const isUnsaved = (proj: string) => !!unsaved?.has(proj.toLowerCase());
+  const optLabel = (proj: string) => (isUnsaved(proj) ? `${proj} · nesalvat` : proj);
+
+  /** Selectarea unui proiect nesalvat nu aplică regula direct: deschide dialogul de
+   *  adopție, precompletat cu cwd-ul real al sesiunii Claude (dacă daemonul îl știe). */
+  const openAdopt = (value: string, proj: string, scope: "day" | "perm") => {
+    setAdoptDir("");
+    setAdoptAsk({ value, proj, scope });
+    void fetchClaudeCwds()
+      .then((m) => {
+        const hit = Object.entries(m).find(([k]) => k.toLowerCase() === proj.toLowerCase());
+        if (hit) setAdoptDir(hit[1]);
+      })
+      .catch(() => undefined);
+  };
+
+  const confirmAdopt = () => {
+    if (!adoptAsk) return;
+    const { value, proj, scope } = adoptAsk;
+    setAdoptBusy(true);
+    void createProject(proj, adoptDir.trim() ? [adoptDir.trim()] : [])
+      .then(() => {
+        setAdoptAsk(null);
+        if (scope === "day") assignDay(value, proj);
+        else assign(value, proj);
+      })
+      .catch((e) => showMsg(`Eroare: ${e}`))
+      .finally(() => setAdoptBusy(false));
+  };
+
   /** Bugetul de timp al țintei pe ziua afișată, din byApp/byDomain: rândul simplu =
    *  „standard", rândurile „nume → X" = feliile deja alocate pe intervale. */
   const budgetOf = (value: string) => {
@@ -1176,8 +1236,15 @@ function ReclassList({
                 if (v === "un:dayproj") unassign(i.name, "dayproj");
                 else if (v === "un:daycls") unassign(i.name, "daycls");
                 else if (v === "un:pin") unassign(i.name, "pin");
-                else if (v.startsWith("day:")) assignDay(i.name, v.slice(4));
-                else if (v.startsWith("perm:")) assign(i.name, v.slice(5));
+                else if (v.startsWith("day:")) {
+                  const p = v.slice(4);
+                  if (isUnsaved(p)) openAdopt(i.name, p, "day");
+                  else assignDay(i.name, p);
+                } else if (v.startsWith("perm:")) {
+                  const p = v.slice(5);
+                  if (isUnsaved(p)) openAdopt(i.name, p, "perm");
+                  else assign(i.name, p);
+                }
                 else if (v.startsWith("cls:")) assignClsDay(i.name, v.slice(4) as ClassName);
               }}
             >
@@ -1200,18 +1267,46 @@ function ReclassList({
                   </>
                 );
               })()}
-              {dayDate ? (
-                <>
-                  <optgroup label={`Doar ziua asta (${dayLabel})`}>
-                    {projects.map((p) => <option key={`d-${p}`} value={`day:${p}`}>{p}</option>)}
-                  </optgroup>
-                  <optgroup label="Permanent (tot istoricul)">
-                    {projects.map((p) => <option key={`p-${p}`} value={`perm:${p}`}>{p}</option>)}
-                  </optgroup>
-                </>
-              ) : (
-                projects.map((p) => <option key={p} value={`perm:${p}`}>{p}</option>)
-              )}
+              {(() => {
+                // proiectele nesalvate stau în grupuri separate: selectarea lor deschide
+                // dialogul de adopție, nu aplică regula direct
+                const saved = projects.filter((p) => !isUnsaved(p));
+                const fresh = projects.filter(isUnsaved);
+                if (!dayDate) {
+                  return (
+                    <>
+                      <optgroup label="Proiecte">
+                        {saved.map((p) => <option key={p} value={`perm:${p}`}>{p}</option>)}
+                      </optgroup>
+                      {fresh.length > 0 && (
+                        <optgroup label="Nesalvate (se creează la selectare)">
+                          {fresh.map((p) => <option key={`n-${p}`} value={`perm:${p}`}>{optLabel(p)}</option>)}
+                        </optgroup>
+                      )}
+                    </>
+                  );
+                }
+                return (
+                  <>
+                    <optgroup label={`Doar ziua asta (${dayLabel})`}>
+                      {saved.map((p) => <option key={`d-${p}`} value={`day:${p}`}>{p}</option>)}
+                    </optgroup>
+                    {fresh.length > 0 && (
+                      <optgroup label={`Doar ziua asta · nesalvate (se creează)`}>
+                        {fresh.map((p) => <option key={`dn-${p}`} value={`day:${p}`}>{optLabel(p)}</option>)}
+                      </optgroup>
+                    )}
+                    <optgroup label="Permanent (tot istoricul)">
+                      {saved.map((p) => <option key={`p-${p}`} value={`perm:${p}`}>{p}</option>)}
+                    </optgroup>
+                    {fresh.length > 0 && (
+                      <optgroup label="Permanent · nesalvate (se creează)">
+                        {fresh.map((p) => <option key={`pn-${p}`} value={`perm:${p}`}>{optLabel(p)}</option>)}
+                      </optgroup>
+                    )}
+                  </>
+                );
+              })()}
             </select>
           </div>
           {variants.map((v) => {
@@ -1272,6 +1367,40 @@ function ReclassList({
             </div>
           </div>
         </>
+      )}
+      {adoptAsk && (
+        <div className="modal-overlay" onClick={() => setAdoptAsk(null)}>
+          <div className="split-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="split-head">
+              <div>
+                <div className="split-title">Creezi proiectul „{adoptAsk.proj}"?</div>
+                <div className="split-sub">
+                  apare în rapoarte, dar nu există în config — a fost dedus din numele folderului
+                  unei sesiuni Claude Code
+                </div>
+              </div>
+              <button className="split-close" title="Închide" onClick={() => setAdoptAsk(null)}>×</button>
+            </div>
+            <div className="field-col">
+              <label>Folder Claude (claude_dirs) — opțional</label>
+              <input
+                value={adoptDir}
+                placeholder="ex. C:\Users\…\yt-cowork"
+                onChange={(e) => setAdoptDir(e.target.value)}
+              />
+              <div className="hint">
+                completat = sesiunile viitoare din acel folder intră direct pe proiect, fără nume dedus.
+                Gol = proiectul se creează oricum, dar numele va continua să vină din folder.
+              </div>
+            </div>
+            <div className="suggest-actions split-actions">
+              <button className="btn primary" disabled={adoptBusy} onClick={confirmAdopt}>
+                Creează și atribuie {adoptAsk.scope === "day" ? `(${scopeWord})` : "(permanent)"}
+              </button>
+              <button className="btn ghost" onClick={() => setAdoptAsk(null)}>Renunță</button>
+            </div>
+          </div>
+        </div>
       )}
       {splitAsk && dayDate && (
         <div className="modal-overlay" onClick={() => setSplitAsk(null)}>
@@ -1338,7 +1467,12 @@ function ReclassList({
                     onChange={(e) => setSpRows((rs) => rs.map((x, j) => j === idx ? { ...x, proj: e.target.value } : x))}
                   >
                     <option value="">proiect…</option>
-                    {projects.map((p) => <option key={p} value={p}>{p}</option>)}
+                    {projects.filter((p) => !isUnsaved(p)).map((p) => <option key={p} value={p}>{p}</option>)}
+                    {projects.some(isUnsaved) && (
+                      <optgroup label="Nesalvate (doar eticheta zilei)">
+                        {projects.filter(isUnsaved).map((p) => <option key={`n-${p}`} value={p}>{optLabel(p)}</option>)}
+                      </optgroup>
+                    )}
                   </select>
                   <select
                     value={r.cls}

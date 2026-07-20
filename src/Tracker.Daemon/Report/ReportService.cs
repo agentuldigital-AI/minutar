@@ -139,6 +139,13 @@ public sealed class ReportService
             .Concat(claudeAttention.Keys)
             .Distinct(StringComparer.OrdinalIgnoreCase);
 
+        // proiecte „nesalvate": nume apărute DOAR din date (fallback-ul pe numele
+        // folderului din ClaudeModule.MapProject), fără intrare în tracker.toml.
+        // UI-ul le grupează separat și cere adopția explicită înainte de a le folosi
+        // în reguli permanente — altfel salvarea eșua cu „proiect necunoscut".
+        var configuredNames = new HashSet<string>(
+            _config.Current.Projects.Select(p => p.Name), StringComparer.OrdinalIgnoreCase);
+
         // presence = doar timpul ÎNREGISTRAT (activ + AFK măsurat). Golurile fără niciun
         // eveniment (PC oprit/hibernat, proces mort) NU intră nicăieri — regula userului
         // 2026-07-12: „când calculatorul e oprit, acel timp nu se ia în calcul". AFK =
@@ -197,6 +204,7 @@ public sealed class ReportService
                     seconds = Math.Round(byProject.GetValueOrDefault(p)),
                     claudeWorkSeconds = Math.Round(claudeWork.GetValueOrDefault(p)),
                     claudeAttentionSeconds = Math.Round(claudeAttention.GetValueOrDefault(p)),
+                    configured = configuredNames.Contains(p),
                 })
                 .OrderByDescending(x => x.seconds + x.claudeWorkSeconds)
                 .ToList(),

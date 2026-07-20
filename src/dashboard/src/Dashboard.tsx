@@ -918,7 +918,17 @@ function ReclassList({
   const assign = (value: string, proj: string) => {
     if (!proj) return;
     setBusy(value);
+    // override-ul de zi spre ACELAȘI proiect devine redundant după pinuire (are doar
+    // precedență, nu efect diferit) — se scoate, ca rândul să nu mai arate „azi".
+    // Cel cu clasă proprie sau spre alt proiect rămâne: acolo ziua chiar diferă.
+    const redundantDay = dayDate && cfg?.assignments?.some((a) =>
+      a.date === dayDate && a.match === match && !a.from && !a.class
+      && a.value.toLowerCase() === value.toLowerCase()
+      && (a.project ?? "").toLowerCase() === proj.toLowerCase());
     void assignToProject(match, value, proj)
+      .then(() => (redundantDay && dayDate
+        ? removeDayAssignment(dayDate, match, value, "project")
+        : Promise.resolve()))
       .then(() => { showMsg(`✓ ${value} → proiect „${proj}" — permanent`); onChanged(); })
       .catch((e) => showMsg(`Eroare: ${e}`))
       .finally(() => setBusy(null));
@@ -936,14 +946,18 @@ function ReclassList({
 
   /** Starea de PROIECT a rândului: atribuirea pe ziua afișată bate pin-ul permanent —
    *  dar pin-ul rămâne vizibil când ziua are doar override de CLASĂ (bug reparat 12 iul). */
-  const projectStateOf = (value: string): { project: string; day: boolean } | null => {
+  const projectStateOf = (value: string): { project: string; day: boolean; both?: boolean } | null => {
     if (!cfg) return null;
     const day = dayDate
       ? cfg.assignments?.find((a) => a.date === dayDate && a.match === match && !a.from && a.value.toLowerCase() === value.toLowerCase())
       : undefined;
-    if (day?.project) return { project: day.project, day: true };
     const pin = cfg.projects.find((p) =>
       ((match === "app" ? p.apps : p.domains) ?? []).some((x) => x.toLowerCase() === value.toLowerCase()));
+    // ziua și pin-ul spre ACELAȘI proiect: eticheta „azi" ar sugera că permanentul n-a
+    // prins, deși e scris în config — se afișează „permanent", iar scoaterea le ia pe ambele
+    if (day?.project && pin && day.project.toLowerCase() === pin.name.toLowerCase())
+      return { project: pin.name, day: false, both: true };
+    if (day?.project) return { project: day.project, day: true };
     return pin ? { project: pin.name, day: false } : null;
   };
 
@@ -1023,9 +1037,13 @@ function ReclassList({
     return parts.join("\n");
   };
 
-  const unassign = (value: string, kind: "dayproj" | "daycls" | "pin") => {
+  const unassign = (value: string, kind: "dayproj" | "daycls" | "pin" | "both") => {
     setBusy(value);
-    const op = kind === "pin" || !dayDate
+    // „both" = pin permanent + override de zi spre același proiect: se scot amândouă,
+    // altfel scoaterea pin-ului ar lăsa ziua atribuită și rândul ar părea neschimbat
+    const op = kind === "both" && dayDate
+      ? unassignFromProject(match, value).then(() => removeDayAssignment(dayDate, match, value, "project"))
+      : kind === "pin" || !dayDate
       ? unassignFromProject(match, value)
       : removeDayAssignment(dayDate, match, value, kind === "dayproj" ? "project" : "class");
     void op
@@ -1236,6 +1254,7 @@ function ReclassList({
                 if (v === "un:dayproj") unassign(i.name, "dayproj");
                 else if (v === "un:daycls") unassign(i.name, "daycls");
                 else if (v === "un:pin") unassign(i.name, "pin");
+                else if (v === "un:both") unassign(i.name, "both");
                 else if (v.startsWith("day:")) {
                   const p = v.slice(4);
                   if (isUnsaved(p)) openAdopt(i.name, p, "day");
@@ -1257,7 +1276,7 @@ function ReclassList({
                       {ps ? `${ps.project} · ${ps.day ? scopeWord : "permanent"}` : (autoLabelOf(i.name) ?? "→ proiect…")}
                     </option>
                     {ps && (
-                      <option value={ps.day ? "un:dayproj" : "un:pin"}>
+                      <option value={ps.both ? "un:both" : ps.day ? "un:dayproj" : "un:pin"}>
                         ✕ scoate proiectul ({ps.day ? scopeWord : "permanent"})
                       </option>
                     )}

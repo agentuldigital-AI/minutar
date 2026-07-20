@@ -34,6 +34,10 @@ public sealed class ClaudeModule : BackgroundService
     private readonly Dictionary<string, DateTimeOffset> _jsonlLastSent = new();
     private readonly Dictionary<string, string> _sessionProject = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, DateTimeOffset> _workLastEmit = new(StringComparer.OrdinalIgnoreCase);
+    // pseudo-proiect (nume de folder, fallback-ul din MapProject) → cwd-ul REAL, ca
+    // dialogul de adopție din dashboard să poată precompleta claude_dirs. In-memory:
+    // se repopulează de la primul hook/jsonl al sesiunii după restart.
+    private readonly Dictionary<string, string> _unmappedCwd = new(StringComparer.OrdinalIgnoreCase);
     private FileSystemWatcher? _jsonlWatcher;
     private string _projectsDir = "";
     private DateTimeOffset _lastAttention;
@@ -285,7 +289,21 @@ public sealed class ClaudeModule : BackgroundService
                     return p.Name;
             }
         }
-        return Path.GetFileName(cwd.TrimEnd('\\', '/'));
+        // niciun claude_dirs nu se potrivește → pseudo-proiect din numele folderului;
+        // reținem cwd-ul real pentru adopția din dashboard
+        var fallback = Path.GetFileName(cwd.TrimEnd('\\', '/'));
+        if (fallback.Length > 0)
+        {
+            lock (_lock) _unmappedCwd[fallback] = cwd.TrimEnd('\\', '/');
+        }
+        return fallback;
+    }
+
+    /// <summary>cwd-urile reale ale pseudo-proiectelor văzute de la pornirea daemonului
+    /// (proiect → cwd), pentru precompletarea lui claude_dirs la adopție.</summary>
+    public Dictionary<string, string> UnmappedCwds()
+    {
+        lock (_lock) return new Dictionary<string, string>(_unmappedCwd, StringComparer.OrdinalIgnoreCase);
     }
 
     private string MapEncodedDir(string encodedDir)

@@ -259,6 +259,50 @@ app.MapPut("/api/config", (ConfigUpdate update) =>
     }
 });
 
+// adopția unui proiect „nesalvat" (nume apărut doar din date — vezi ReportService).
+// ADITIV, nu overwrite: nu cere token de versiune, deci nu poate pierde modificări
+// făcute între timp de popup/assign-day/coach (spre deosebire de PUT /api/config).
+app.MapPost("/api/projects", (NewProjectDto req) =>
+{
+    try
+    {
+        var name = (req.Name ?? "").Trim();
+        if (name.Length == 0) return Results.BadRequest(new { error = "proiect fără nume" });
+
+        lock (ConfigWriter.SyncRoot)
+        {
+            var updated = TrackerConfig.Load(config.ConfigPath);
+            if (updated.Projects.Any(p => p.Name.Trim().Equals(name, StringComparison.OrdinalIgnoreCase)))
+                return Results.Ok(new { created = false, name }); // idempotent: există deja
+
+            updated.Projects.Add(new ProjectConfig
+            {
+                Name = name,
+                Keywords = new List<string>(),
+                ClaudeDirs = (req.ClaudeDirs ?? new List<string>())
+                    .Select(x => x.Trim()).Where(x => x.Length > 0)
+                    .Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+                BrowserProfiles = new List<string>(),
+                Apps = new List<string>(),
+                Domains = new List<string>(),
+            });
+            updated.Validate();
+            ConfigWriter.Write(updated, config.ConfigPath);
+            Log.Info($"Project adopted from the dashboard: {name}");
+        }
+        return Results.Ok(new { created = true, name });
+    }
+    catch (Exception ex)
+    {
+        Log.Error("Project create failed: " + ex.Message);
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
+// cwd-urile reale ale pseudo-proiectelor Claude, ca dialogul de adopție să precompleteze
+// claude_dirs (in-memory în ClaudeModule: gol până la primul hook de după restart)
+app.MapGet("/api/claude/cwds", () => Results.Json(claude.UnmappedCwds()));
+
 // per-day project assignment ("today's Zoom → client X") — dashboard "doar ziua asta"
 app.MapPost("/api/assign-day", (DayAssignDto req) =>
 {
@@ -656,6 +700,7 @@ app.Run(url);
 internal sealed record ProjectDto(
     string Name, List<string> Keywords, List<string> ClaudeDirs, List<string> BrowserProfiles,
     List<string>? Apps = null, List<string>? Domains = null);
+internal sealed record NewProjectDto(string? Name, List<string>? ClaudeDirs = null);
 internal sealed record RuleDto(string Class, string Match, string Value);
 internal sealed record ClassificationDto(string Default, List<RuleDto> Rules);
 internal sealed record YoutubeDto(List<string> TitleKeywords, List<string> Channels);

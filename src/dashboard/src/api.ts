@@ -8,6 +8,9 @@ export interface ProjectRow {
   seconds: number;
   claudeWorkSeconds: number;
   claudeAttentionSeconds: number;
+  /** false = proiect „nesalvat": nume apărut doar din date (folderul unei sesiuni
+   *  Claude fără claude_dirs configurat), fără intrare în tracker.toml */
+  configured?: boolean;
 }
 
 export interface TimelineSegment {
@@ -200,6 +203,28 @@ export async function unassignFromProject(match: "app" | "domain", value: string
     p.domains = (p.domains ?? []).filter((x) => x.toLowerCase() !== value.toLowerCase());
   }
   await saveConfig(cfg);
+}
+
+/** Adoptă un proiect „nesalvat" (îl scrie în tracker.toml). Aditiv și idempotent pe
+ *  server — nu trimite tot config-ul, deci nu poate da 409 și nu suprascrie nimic. */
+export async function createProject(name: string, claudeDirs: string[] = []): Promise<void> {
+  const resp = await fetch("/api/projects", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, claudeDirs }),
+  });
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => null);
+    throw new Error(body?.error ?? `create-project ${resp.status}`);
+  }
+}
+
+/** cwd-urile reale ale pseudo-proiectelor Claude (proiect → cwd), pentru precompletarea
+ *  lui claude_dirs la adopție. Gol până la primul hook de după repornirea daemonului. */
+export async function fetchClaudeCwds(): Promise<Record<string, string>> {
+  const resp = await fetch("/api/claude/cwds");
+  if (!resp.ok) return {};
+  return resp.json().catch(() => ({}));
 }
 
 /** Pin an app/domain to a PROJECT going forward (explicit pins beat profile + keywords). */

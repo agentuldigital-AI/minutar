@@ -344,8 +344,11 @@ select:focus, input:focus { outline: 2px solid color-mix(in srgb, var(--accent) 
 .reclass-row .name.clickable:hover { background: var(--card-2); }
 
 /* sub-rânduri „↳ variantă" (felii atribuite pe intervale) — informative, fără acțiuni;
-   aceeași mărime de text ca activitățile principale (doar culoarea diferă) */
-.row.sub .name { color: var(--text-secondary); padding-left: 16px; }
+   aceeași mărime de text ca activitățile principale (doar culoarea diferă).
+   .name e flex ca ×-ul (sub-x) să aibă slot FIX și să nu fie tăiat de ellipsis-ul
+   textului lung — trunchierea se aplică doar pe .sub-label, nu pe tot rândul. */
+.row.sub .name { color: var(--text-secondary); padding-left: 16px; display: flex; align-items: center; }
+.row.sub .sub-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto; }
 .row.sub .sub-arrow { opacity: 0.6; margin-right: 4px; }
 .row.sub .val { color: var(--text-secondary); }
 
@@ -407,9 +410,10 @@ select:focus, input:focus { outline: 2px solid color-mix(in srgb, var(--accent) 
   margin: 0 2px 0 5px; box-shadow: 0 0 0 1px var(--border); vertical-align: 0;
 }
 
-/* × de pe sub-rânduri (scoate alocarea întreagă) — suficient de mare cât să fie țintibil */
+/* × de pe sub-rânduri (scoate alocarea întreagă) — suficient de mare cât să fie țintibil;
+   flex-shrink:0 = niciodată tăiat de ellipsis-ul textului din .sub-label vecin */
 .sub-x {
-  margin-left: 8px; font-size: 16px; line-height: 1;
+  margin-left: 8px; font-size: 16px; line-height: 1; flex: 0 0 auto;
   display: inline-block; padding: 1px 5px; border-radius: 6px; vertical-align: -1px;
 }
 .sub-x:hover { background: var(--card-2); }

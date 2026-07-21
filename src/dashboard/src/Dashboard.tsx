@@ -1340,9 +1340,11 @@ function ReclassList({
             return (
               <div key={v.name} className="row reclass-row sub">
                 <span className="name" title={`${i.name} → ${label} — timp alocat manual (doar pe ${dayLabel})`}>
-                  <span className="sub-arrow">↳</span>
-                  {subCls && <span className="dot-mini" style={{ background: CLASS_VAR[subCls] }} title={CLASS_LABEL[subCls]} />}
-                  {" "}{label}
+                  <span className="sub-label">
+                    <span className="sub-arrow">↳</span>
+                    {subCls && <span className="dot-mini" style={{ background: CLASS_VAR[subCls] }} title={CLASS_LABEL[subCls]} />}
+                    {" "}{label}
+                  </span>
                   {canRemove && (
                     <span className="chip-x sub-x" title={`Scoate alocarea „${label}"`}
                       onClick={() => void removeAllocation(i.name, label)}>×</span>

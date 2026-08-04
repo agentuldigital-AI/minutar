@@ -71,6 +71,23 @@ public sealed class BrowserStateStore
     }
 
     /// <summary>
+    /// May this instance claim the current foreground window (i.e. should its heartbeat be
+    /// written as the active tab)? Same rule the live state uses in <see cref="BestFor"/>:
+    /// an internal page proves nothing by its title, so it needs positive AUMID confirmation.
+    /// Without this the write path stayed permissive while the live state was already
+    /// correct — the bar showed nothing, but the report still credited the other profile
+    /// (observed 19:57, 2026-08-04).
+    /// </summary>
+    public bool CanClaimForegroundWindow(BrowserHeartbeat hb, string? windowAumid)
+    {
+        lock (_lock)
+        {
+            if (!AumidCompatibleLocked(hb.Browser, hb.Profile, windowAumid)) return false;
+            return !IsInternalPage(hb.Url) || AumidConfirmsLocked(hb.Browser, hb.Profile, windowAumid);
+        }
+    }
+
+    /// <summary>
     /// False only when we already know which windows this instance owns and the foreground
     /// one is not among them. Until the first confirmed pairing is learned nothing is
     /// blocked, so a fresh start behaves exactly as before.

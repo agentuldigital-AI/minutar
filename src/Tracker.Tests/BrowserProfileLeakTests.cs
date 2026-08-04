@@ -70,6 +70,40 @@ public sealed class BrowserProfileLeakTests
     }
 
     [Fact]
+    public void WritePath_RejectsAnInternalPageClaimingSomeoneElsesWindow()
+    {
+        // observed live: the bar was already clean, but the heartbeat still landed in the
+        // web bucket, so the REPORT kept crediting the other profile
+        var store = new BrowserStateStore();
+        var hb = Hb("Client A", "New Tab", "chrome://newtab/", focused: true);
+        store.Update(hb);
+
+        Assert.False(store.CanClaimForegroundWindow(hb, "Chrome.UserData.Profile2"));
+    }
+
+    [Fact]
+    public void WritePath_AcceptsAnInternalPageOnItsOwnConfirmedWindow()
+    {
+        var store = new BrowserStateStore();
+        var hb = Hb("Client A", "New Tab", "chrome://newtab/", focused: true);
+        store.Update(hb);
+        store.LearnAumid("chrome", "Client A", "Chrome.UserData.Profile2");
+
+        Assert.True(store.CanClaimForegroundWindow(hb, "Chrome.UserData.Profile2"));
+    }
+
+    [Fact]
+    public void WritePath_AcceptsARealPageWhileNothingIsKnownYet()
+    {
+        // cold start: no pairing learned, ordinary page — behave exactly as before
+        var store = new BrowserStateStore();
+        var hb = Hb("Client B", "Client B", "https://clientb.example/", focused: true);
+        store.Update(hb);
+
+        Assert.True(store.CanClaimForegroundWindow(hb, "Chrome.UserData.Profile1"));
+    }
+
+    [Fact]
     public void ForegroundWindowWithNoMatchingTab_GetsNoBrowserState()
     {
         var store = new BrowserStateStore();

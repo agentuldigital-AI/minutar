@@ -664,7 +664,7 @@ app.MapPost("/browser/heartbeat", async (BrowserHeartbeat hb) =>
         // the strict proof stays whenever the SAME browser has 2+ fresh profiles
         if (!shouldWrite
             && ForegroundMatchesBrowser(curWin.App, hb.Browser)
-            && browserStore.AumidCompatible(hb.Browser, hb.Profile, curWin.Aumid)
+            && browserStore.CanClaimForegroundWindow(hb, curWin.Aumid)
             && browserStore.IsOnlyFreshInstanceOfBrowser(hb.Browser, hb.Profile, TimeSpan.FromSeconds(90)))
         {
             shouldWrite = true;

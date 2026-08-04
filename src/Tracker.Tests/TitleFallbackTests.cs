@@ -173,7 +173,7 @@ public sealed class TitleFallbackTests
     {
         // the deliberate way to claim documents by name
         var cfg = Config();
-        cfg.Projects.Add(new ProjectConfig { Name = "Client C", Keywords = new List<string> { "dristor" } });
+        cfg.Projects.Add(new ProjectConfig { Name = "Client C", Keywords = new List<string> { "clientc" } });
 
         var report = AttributionEngine.Resolve(
             cfg, "chrome.exe", "CLIENTC_DECK_VANZARE - Google Chrome", aumid: "", url: null, profileLabel: null);

@@ -391,7 +391,7 @@ public sealed class ReportService
             }
             // straturi: atribuirea pe ZI se aplică întâi (peste reguli), apoi INTERVALUL
             // deasupra ei, doar pe câmpurile pe care le definește — „13:00-13:30 productiv"
-            // nu anulează „tot Zoom-ul de azi → Client E" în acea jumătate de oră
+            // nu anulează „tot Zoom-ul de azi → Client A" în acea jumătate de oră
             if (dayHit is not null)
             {
                 if (dayHit.Project.Length > 0) project = dayHit.Project;

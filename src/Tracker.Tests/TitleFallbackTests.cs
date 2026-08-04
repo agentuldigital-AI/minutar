@@ -110,6 +110,51 @@ public sealed class TitleFallbackTests
     }
 
     [Fact]
+    public void Hold_DoesNotCarryTheProjectIntoAnotherBrowserProfile()
+    {
+        var cfg = Config();
+        var att = new AttributionEngine();
+        var t0 = DateTimeOffset.UtcNow;
+
+        // profile WITH the extension: attributed from its label
+        Assert.Equal("general", att.Attribute(
+            cfg, "chrome.exe", "Calendly", "Chrome.UserData.Profile2", null, "General", t0));
+
+        // switch to a profile WITHOUT it — same chrome.exe, different window identity
+        Assert.Null(att.Attribute(
+            cfg, "chrome.exe", "New Tab", "Chrome", null, null, t0.AddSeconds(3)));
+    }
+
+    [Fact]
+    public void Hold_StillBridgesTabSwitchesInsideTheSameProfile()
+    {
+        var cfg = Config();
+        var att = new AttributionEngine();
+        var t0 = DateTimeOffset.UtcNow;
+
+        Assert.Equal("general", att.Attribute(
+            cfg, "chrome.exe", "Calendly", "Chrome.UserData.Profile2", null, "General", t0));
+
+        // same window identity, a moment with no usable signal — the grace period applies
+        Assert.Equal("general", att.Attribute(
+            cfg, "chrome.exe", "New Tab", "Chrome.UserData.Profile2", null, null, t0.AddSeconds(3)));
+    }
+
+    [Fact]
+    public void Hold_StillAppliesToNonBrowserApps()
+    {
+        var cfg = Config();
+        cfg.Projects.Add(new ProjectConfig { Name = "editor", Apps = new List<string> { "code.exe" } });
+        var att = new AttributionEngine();
+        var t0 = DateTimeOffset.UtcNow;
+
+        Assert.Equal("editor", att.Attribute(cfg, "code.exe", "main.cs", "", null, null, t0));
+        // non-browser windows carry no per-profile AUMID, so the app-level hold is unchanged
+        cfg.Projects.RemoveAll(p => p.Name == "editor");
+        Assert.Equal("editor", att.Attribute(cfg, "code.exe", "untitled", "", null, null, t0.AddSeconds(3)));
+    }
+
+    [Fact]
     public void ProfileFragment_StillMatchesExtensionLabelOnAnyBrowser()
     {
         var project = new AttributionEngine().Attribute(

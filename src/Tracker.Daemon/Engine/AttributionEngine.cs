@@ -12,6 +12,7 @@ public sealed class AttributionEngine
 {
     private string? _lastProject;
     private string? _lastApp;
+    private string? _lastAumid;
     private DateTimeOffset _lastMatch;
 
     public string? Attribute(
@@ -26,15 +27,25 @@ public sealed class AttributionEngine
         {
             _lastProject = project;
             _lastApp = app;
+            _lastAumid = aumid;
             _lastMatch = now;
             return project;
         }
 
         // TimeCamp-style hold, but ONLY within the same app: it bridges brief no-match
         // moments (tab switches, generic titles) — switching to ANOTHER app
-        // (browser → Claude/WhatsApp) must drop the project instantly
+        // (browser → Claude/WhatsApp) must drop the project instantly.
+        //
+        // For browsers "same app" is too coarse: every profile is the same chrome.exe, so
+        // the hold carried a client's project across into a profile WITHOUT the extension
+        // — switching from the Client A profile to the plain one kept showing her
+        // project for 20 s (2026-08-04). Browser windows must also be the same profile,
+        // identified by AUMID; a missing AUMID is not good enough proof to hold on.
+        var sameWindowIdentity = !IsBrowser(cfg, app)
+            || (aumid.Length > 0 && string.Equals(_lastAumid, aumid, StringComparison.OrdinalIgnoreCase));
         if (_lastProject is not null
             && app.Equals(_lastApp, StringComparison.OrdinalIgnoreCase)
+            && sameWindowIdentity
             && (now - _lastMatch).TotalSeconds <= cfg.Attribution.HoldSeconds)
             return _lastProject;
 

@@ -66,8 +66,20 @@ public sealed class ClassificationEngine
                    || host.EndsWith("." + domain, StringComparison.OrdinalIgnoreCase);
         }
         if (!titleFallback) return false;
-        var site = domain.Split('.')[0];
-        return site.Length >= 4 && AttributionEngine.ContainsWholeWord(title, site);
+
+        // The title fallback is a GUESS, so it only applies where the guess is sound: a
+        // second-level domain, whose first label really is the site name ("github.com" →
+        // "github"). Two cases used to slip through and mis-attribute whole windows
+        // (2026-08-04):
+        //   • a subdomain reduced to its prefix — "mail.zoho.eu" → "mail", so every window
+        //     titled "Mail — …" was counted as that project;
+        //   • browser-internal pseudo-domains ("settings", "downloads", "extensions") have
+        //     no business matching titles at all — with a real URL they still match exactly,
+        //     because chrome://settings parses with Host="settings".
+        var labels = domain.Split('.');
+        if (labels.Length != 2) return false;
+        var site = labels[0];
+        return site.Length >= 5 && AttributionEngine.ContainsWholeWord(title, site);
     }
 
     private static bool IsException(TrackerConfig cfg, string title, string? url, string? channel)

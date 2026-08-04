@@ -19,7 +19,7 @@ public sealed class AttributionEngine
         string? url, string? profileLabel, DateTimeOffset now)
     {
         // precedence: explicit app/domain pins > browser profile > keywords
-        var project = MatchExplicit(cfg, app, title, url)
+        var project = MatchExplicit(cfg, app, title, url, IsBrowser(cfg, app))
                       ?? MatchProfile(cfg, app, title, aumid, profileLabel)
                       ?? MatchKeywords(cfg, app, title, url);
         if (project is not null)
@@ -42,13 +42,17 @@ public sealed class AttributionEngine
         return null;
     }
 
-    private static string? MatchExplicit(TrackerConfig cfg, string app, string title, string? url)
+    private static string? MatchExplicit(TrackerConfig cfg, string app, string title, string? url, bool isBrowser)
     {
         foreach (var p in cfg.Projects)
         {
             if (p.Apps.Any(a => a.Equals(app, StringComparison.OrdinalIgnoreCase)))
                 return p.Name;
-            if (p.Domains.Any(d => d.Length > 0 && ClassificationEngine.MatchesDomain(d, url, title)))
+            // titleFallback only for browser windows — the same guard classification uses.
+            // Without it a project domain leaked into EVERY app: "mail.zoho.eu" made any
+            // window titled "Mail" (Outlook, explorer, anything) that client's project.
+            if (p.Domains.Any(d => d.Length > 0
+                    && ClassificationEngine.MatchesDomain(d, url, title, titleFallback: isBrowser)))
                 return p.Name;
         }
         return null;
@@ -64,8 +68,11 @@ public sealed class AttributionEngine
                 if (string.IsNullOrWhiteSpace(frag)) continue;
                 if (label is not null && label.Contains(frag, StringComparison.OrdinalIgnoreCase)) return p.Name;
                 if (aumid.Contains(frag, StringComparison.OrdinalIgnoreCase)) return p.Name;
-                // Edge puts the profile display name in the window title (verified live 2026-07-07)
-                if (title.Contains(frag, StringComparison.OrdinalIgnoreCase)) return p.Name;
+                // Edge puts the profile display name in the window title (verified live
+                // 2026-07-07) — but ONLY Edge does, and only as a whole word. A plain
+                // Contains over every browser matched "Setari generale" and "General Motors"
+                // against the profile fragment "General" (2026-08-04).
+                if (IsEdge(app) && ContainsWholeWord(title, frag)) return p.Name;
             }
         }
         return null;
@@ -92,6 +99,9 @@ public sealed class AttributionEngine
 
     public static bool IsBrowser(TrackerConfig cfg, string app) =>
         cfg.Browser.Processes.Contains(app, StringComparer.OrdinalIgnoreCase);
+
+    private static bool IsEdge(string app) =>
+        app.StartsWith("msedge", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Whole-word match: neighbours must not be letters/digits (keywords may contain '-').</summary>
     public static bool ContainsWholeWord(string hay, string word)

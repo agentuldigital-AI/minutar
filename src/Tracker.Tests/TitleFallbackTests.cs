@@ -1,0 +1,121 @@
+using Tracker.Daemon.Engine;
+using Tracker.Shared.Config;
+using Xunit;
+
+namespace Tracker.Tests;
+
+/// <summary>
+/// Guards the title fallback used when no URL is available (browser without the extension).
+/// Three real mis-attributions from 2026-08-04 are pinned here: a project domain leaking
+/// into every app through its subdomain prefix, browser-internal pseudo-domains matching
+/// titles, and a profile fragment matching as a substring.
+/// </summary>
+public sealed class TitleFallbackTests
+{
+    private static TrackerConfig Config()
+    {
+        var cfg = new TrackerConfig();
+        cfg.Classification.Default = "neutral";
+        cfg.Browser.Processes = new List<string> { "chrome.exe", "msedge.exe", "brave.exe" };
+        cfg.Classification.Rules.Add(new ClassificationRule { Class = "productive", Match = "domain", Value = "settings" });
+        cfg.Classification.Rules.Add(new ClassificationRule { Class = "productive", Match = "domain", Value = "github.com" });
+        cfg.Classification.Rules.Add(new ClassificationRule { Class = "unproductive", Match = "domain", Value = "youtube.com" });
+        cfg.Projects.Add(new ProjectConfig
+        {
+            Name = "Client Zoho",
+            Domains = new List<string> { "mail.zoho.eu" },
+        });
+        cfg.Projects.Add(new ProjectConfig
+        {
+            Name = "general",
+            BrowserProfiles = new List<string> { "General" },
+        });
+        return cfg;
+    }
+
+    [Theory]
+    // a subdomain must NOT collapse to its prefix: "mail.zoho.eu" is not "mail"
+    [InlineData("chrome.exe", "Mail - Iustin - Outlook")]
+    // …and a project domain must not reach non-browser windows at all
+    [InlineData("olk.exe", "Mail")]
+    [InlineData("explorer.exe", "mail atasamente")]
+    public void ProjectDomain_DoesNotMatchTitleThroughSubdomainPrefix(string app, string title)
+    {
+        var project = new AttributionEngine().Attribute(
+            Config(), app, title, aumid: "", url: null, profileLabel: null, DateTimeOffset.UtcNow);
+
+        Assert.Null(project);
+    }
+
+    [Fact]
+    public void ProjectDomain_StillMatchesOnRealUrl()
+    {
+        var project = new AttributionEngine().Attribute(
+            Config(), "chrome.exe", "Inbox", aumid: "", url: "https://mail.zoho.eu/inbox",
+            profileLabel: null, DateTimeOffset.UtcNow);
+
+        Assert.Equal("Client Zoho", project);
+    }
+
+    [Theory]
+    [InlineData("Settings - Brave")]
+    [InlineData("Downloads")]
+    public void BrowserInternalPseudoDomain_DoesNotMatchTitle(string title)
+    {
+        var cls = new ClassificationEngine().Classify(Config(), "brave.exe", title, null, null);
+
+        Assert.Equal("neutral", cls.Class);
+    }
+
+    [Fact]
+    public void BrowserInternalPseudoDomain_StillMatchesItsOwnUrl()
+    {
+        // chrome://settings parses with Host="settings", so the rule keeps working where it was meant to
+        var cls = new ClassificationEngine().Classify(Config(), "brave.exe", "Settings", "chrome://settings", null);
+
+        Assert.Equal("productive", cls.Class);
+    }
+
+    [Theory]
+    [InlineData("github.com hosting - Chrome", "productive")]
+    [InlineData("Ceva - YouTube", "unproductive")]
+    public void SecondLevelDomain_StillMatchesTitle(string title, string expected)
+    {
+        var cls = new ClassificationEngine().Classify(Config(), "chrome.exe", title, null, null);
+
+        Assert.Equal(expected, cls.Class);
+    }
+
+    [Theory]
+    [InlineData("chrome.exe", "Setari generale - Panou")]
+    [InlineData("chrome.exe", "General Motors - stiri")]
+    // Edge is the only browser that puts the profile name in the title, and only as a word
+    [InlineData("msedge.exe", "Raport generale - Microsoft Edge")]
+    public void ProfileFragment_DoesNotMatchTitleAsSubstring(string app, string title)
+    {
+        var project = new AttributionEngine().Attribute(
+            Config(), app, title, aumid: "", url: null, profileLabel: null, DateTimeOffset.UtcNow);
+
+        Assert.Null(project);
+    }
+
+    [Fact]
+    public void ProfileFragment_StillMatchesEdgeTitleAsWholeWord()
+    {
+        var project = new AttributionEngine().Attribute(
+            Config(), "msedge.exe", "Ceva - General - Microsoft Edge", aumid: "", url: null,
+            profileLabel: null, DateTimeOffset.UtcNow);
+
+        Assert.Equal("general", project);
+    }
+
+    [Fact]
+    public void ProfileFragment_StillMatchesExtensionLabelOnAnyBrowser()
+    {
+        var project = new AttributionEngine().Attribute(
+            Config(), "chrome.exe", "Calendly", aumid: "", url: null, profileLabel: "General",
+            DateTimeOffset.UtcNow);
+
+        Assert.Equal("general", project);
+    }
+}

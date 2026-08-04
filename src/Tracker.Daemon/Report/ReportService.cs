@@ -74,7 +74,7 @@ public sealed class ReportService
         {
             var sec = (s.End - s.Start).TotalSeconds;
             byClass[s.Cls] = byClass.GetValueOrDefault(s.Cls) + sec;
-            // felia atribuită pe interval devine rând separat („zoom.exe → ClientX");
+            // felia atribuită pe interval devine rând separat („zoom.exe → Client A");
             // rândul simplu rămâne diferența pe standard (cerința userului, 2026-07-12).
             // Cheile-variantă intră în TOATE listele (Aplicații/Domenii, per clasă, per
             // proiect) — UI-ul le desenează ca sub-rânduri informative, iar acțiunile de
@@ -242,8 +242,8 @@ public sealed class ReportService
 
     // ---- retroactive classification core (TimeCamp model) ---------------------
 
-    /// <summary>Variant = eticheta atribuirii pe INTERVAL („ClientX", „neproductiv") — listele
-    /// Aplicații/Domenii afișează felia custom ca rând separat („zoom.exe → ClientX"), iar
+    /// <summary>Variant = eticheta atribuirii pe INTERVAL („Client A", „neproductiv") — listele
+    /// Aplicații/Domenii afișează felia custom ca rând separat („zoom.exe → Client A"), iar
     /// rândul simplu rămâne diferența pe standard. Gol = felie neatinsă de intervale.</summary>
     private sealed record ClassifiedSlice(
         DateTimeOffset Start, DateTimeOffset End, string App, string? Domain, string Cls, string Project,
@@ -502,6 +502,12 @@ public sealed class ReportService
             var title = Str(w.Data, "title") ?? "";
             if (aumid.Length == 0 || title.Length == 0) continue;
 
+            // A generic AUMID identifies the BROWSER, not a profile: Chrome uses plain
+            // "Chrome" for some windows and "Chrome.UserData.ProfileN" for others, Edge uses
+            // "MSEdge" everywhere. Voting on it made every window of every profile without the
+            // extension inherit the one profile that does report (2026-08-04).
+            if (!aumid.Contains('.')) continue;
+
             var mid = w.Timestamp.AddSeconds(w.Duration / 2);
             foreach (var e in web)
             {
@@ -510,6 +516,9 @@ public sealed class ReportService
                 var tabTitle = Str(e.Data, "title") ?? "";
                 var prof = Str(e.Data, "profile");
                 if (string.IsNullOrEmpty(prof) || tabTitle.Length < 3) continue;
+                // internal pages ("New Tab", "Settings") carry the same title in every
+                // profile, so a title match against them proves nothing
+                if (State.BrowserStateStore.IsInternalPage(Str(e.Data, "url"))) continue;
                 if (!title.Contains(tabTitle, StringComparison.OrdinalIgnoreCase)) continue;
 
                 if (!votes.TryGetValue(aumid, out var inner))
@@ -520,10 +529,12 @@ public sealed class ReportService
                 inner[prof] = inner.GetValueOrDefault(prof) + 1;
             }
         }
-        return votes.ToDictionary(
-            kv => kv.Key,
-            kv => kv.Value.OrderByDescending(x => x.Value).First().Key,
-            StringComparer.Ordinal);
+        // An AUMID seen with SEVERAL profiles is shared, so it identifies none of them —
+        // taking the majority vote there would silently hand every window to whichever
+        // profile happened to report more often.
+        return votes
+            .Where(kv => kv.Value.Count == 1)
+            .ToDictionary(kv => kv.Key, kv => kv.Value.First().Key, StringComparer.Ordinal);
     }
 
     /// <summary>Same precedence as the live engine, minus the hold: pins > profile > keywords.</summary>

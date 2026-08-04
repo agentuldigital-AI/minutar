@@ -107,7 +107,7 @@ public sealed class BrowserStateStore
         && own.Contains(aumid);
 
     /// <summary>chrome://, edge://, about: … — same title in every profile of that browser.</summary>
-    private static bool IsInternalPage(string? url) =>
+    public static bool IsInternalPage(string? url) =>
         !string.IsNullOrEmpty(url)
         && (url.StartsWith("about:", StringComparison.OrdinalIgnoreCase)
             || url.StartsWith("chrome://", StringComparison.OrdinalIgnoreCase)

@@ -152,7 +152,7 @@ public sealed class RulesEngineService : BackgroundService
         }
 
         var isBrowser = AttributionEngine.IsBrowser(cfg, win.App);
-        var browser = isBrowser ? _browser.BestFor(win.Title, win.App, BrowserFreshness) : null;
+        var browser = isBrowser ? _browser.BestFor(win.Title, win.App, BrowserFreshness, win.Aumid) : null;
 
         // BestFor only resolves on a tab-title match, so this pairing is trustworthy: learn
         // which window AUMID belongs to which profile. It is what later lets us tell two

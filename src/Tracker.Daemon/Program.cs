@@ -654,7 +654,7 @@ app.MapPost("/browser/heartbeat", async (BrowserHeartbeat hb) =>
     }
     else
     {
-        var best = browserStore.BestFor(curWin.Title, curWin.App, TimeSpan.FromSeconds(90));
+        var best = browserStore.BestFor(curWin.Title, curWin.App, TimeSpan.FromSeconds(90), curWin.Aumid);
         shouldWrite = best is not null
             && string.Equals(best.Browser, hb.Browser, StringComparison.OrdinalIgnoreCase)
             && string.Equals(best.Profile, hb.Profile, StringComparison.OrdinalIgnoreCase);
@@ -664,7 +664,7 @@ app.MapPost("/browser/heartbeat", async (BrowserHeartbeat hb) =>
         // the strict proof stays whenever the SAME browser has 2+ fresh profiles
         if (!shouldWrite
             && ForegroundMatchesBrowser(curWin.App, hb.Browser)
-            && !browserStore.AumidBelongsToOtherProfile(hb.Browser, hb.Profile, curWin.Aumid)
+            && browserStore.AumidCompatible(hb.Browser, hb.Profile, curWin.Aumid)
             && browserStore.IsOnlyFreshInstanceOfBrowser(hb.Browser, hb.Profile, TimeSpan.FromSeconds(90)))
         {
             shouldWrite = true;

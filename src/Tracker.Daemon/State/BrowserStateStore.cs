@@ -62,22 +62,41 @@ public sealed class BrowserStateStore
     /// An unseen AUMID returns false, so nothing regresses while the mapping is still being
     /// learned, or on browsers that do not vary it per profile.
     /// </summary>
-    public bool AumidBelongsToOtherProfile(string? browser, string? profile, string? aumid)
+    public bool AumidCompatible(string? browser, string? profile, string? aumid)
     {
-        if (string.IsNullOrEmpty(aumid)) return false;
-        var key = KeyOf(browser, profile);
-        var prefix = $"{browser}|";
         lock (_lock)
         {
-            if (_aumidsByInstance.TryGetValue(key, out var own) && own.Contains(aumid)) return false;
-            foreach (var (k, set) in _aumidsByInstance)
-            {
-                if (k == key || !k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
-                if (set.Contains(aumid)) return true;
-            }
-            return false;
+            return AumidCompatibleLocked(browser, profile, aumid);
         }
     }
+
+    /// <summary>
+    /// False only when we already know which windows this instance owns and the foreground
+    /// one is not among them. Until the first confirmed pairing is learned nothing is
+    /// blocked, so a fresh start behaves exactly as before.
+    /// </summary>
+    private bool AumidCompatibleLocked(string? browser, string? profile, string? aumid)
+    {
+        if (string.IsNullOrEmpty(aumid)) return true; // watcher gave us nothing to judge by
+        if (!_aumidsByInstance.TryGetValue(KeyOf(browser, profile), out var own) || own.Count == 0)
+            return true;
+        return own.Contains(aumid);
+    }
+
+    /// <summary>Positive proof: this AUMID has been seen belonging to exactly this instance.</summary>
+    private bool AumidConfirmsLocked(string? browser, string? profile, string? aumid) =>
+        !string.IsNullOrEmpty(aumid)
+        && _aumidsByInstance.TryGetValue(KeyOf(browser, profile), out var own)
+        && own.Contains(aumid);
+
+    /// <summary>chrome://, edge://, about: … — same title in every profile of that browser.</summary>
+    private static bool IsInternalPage(string? url) =>
+        !string.IsNullOrEmpty(url)
+        && (url.StartsWith("about:", StringComparison.OrdinalIgnoreCase)
+            || url.StartsWith("chrome://", StringComparison.OrdinalIgnoreCase)
+            || url.StartsWith("edge://", StringComparison.OrdinalIgnoreCase)
+            || url.StartsWith("brave://", StringComparison.OrdinalIgnoreCase)
+            || url.StartsWith("chrome-search://", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
     /// True when the given (browser, profile) is the ONLY fresh instance of that browser —
@@ -120,7 +139,7 @@ public sealed class BrowserStateStore
     /// browser, only instances of THAT browser compete — an identical tab title open in
     /// the other browser must not steal the profile (flip-flop fix).
     /// </summary>
-    public BrowserHeartbeat? BestFor(string windowTitle, string? foregroundApp, TimeSpan maxAge)
+    public BrowserHeartbeat? BestFor(string windowTitle, string? foregroundApp, TimeSpan maxAge, string? windowAumid = null)
     {
         var cutoff = DateTimeOffset.UtcNow - maxAge;
         lock (_lock)
@@ -132,9 +151,18 @@ public sealed class BrowserStateStore
                 var same = fresh.Where(v => string.Equals(v.Hb.Browser, appBrowser, StringComparison.OrdinalIgnoreCase)).ToList();
                 if (same.Count > 0) fresh = same;
             }
+            // drop instances whose known windows do not include this one
+            fresh = fresh.Where(v => AumidCompatibleLocked(v.Hb.Browser, v.Hb.Profile, windowAumid)).ToList();
+
             var titled = fresh
                 .Where(v => v.Hb.Title.Length >= 3 &&
                             windowTitle.Contains(v.Hb.Title, StringComparison.OrdinalIgnoreCase))
+                // A browser-internal page ("New Tab", "Settings", "Downloads") carries the SAME
+                // title in every profile, so the title proves nothing: a new tab open in the
+                // client profile matched the plain profile's "New Tab - Google Chrome" window
+                // and lent it that client (2026-08-04). Such a candidate is only accepted when
+                // the window AUMID positively confirms it really is that profile's window.
+                .Where(v => !IsInternalPage(v.Hb.Url) || AumidConfirmsLocked(v.Hb.Browser, v.Hb.Profile, windowAumid))
                 .OrderByDescending(v => v.Hb.Title.Length)
                 .ThenByDescending(v => v.Hb.Focused) // tie pe titluri identice: instanța cu focus OS câștigă
                 .ThenByDescending(v => v.At)

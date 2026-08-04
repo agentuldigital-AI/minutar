@@ -18,6 +18,58 @@ public sealed class BrowserProfileLeakTests
             Browser: "chrome");
 
     [Fact]
+    public void NewTabInAnotherProfile_DoesNotMatchOurNewTabWindow()
+    {
+        // the exact 2026-08-04 leak: a client profile sitting on chrome://newtab, while the
+        // user tabs around a profile without the extension whose window is also "New Tab"
+        var store = new BrowserStateStore();
+        store.Update(Hb("Client A", "New Tab", "chrome://newtab/", focused: true));
+
+        var best = store.BestFor("New Tab - Google Chrome", "chrome.exe", Fresh, "Chrome");
+
+        Assert.Null(best);
+    }
+
+    [Theory]
+    [InlineData("Settings", "chrome://settings")]
+    [InlineData("Downloads", "edge://downloads/all")]
+    [InlineData("Untitled", "about:blank")]
+    public void InternalPagesNeverProveIdentityByTitle(string tabTitle, string url)
+    {
+        var store = new BrowserStateStore();
+        store.Update(Hb("Client A", tabTitle, url, focused: true));
+
+        Assert.Null(store.BestFor($"{tabTitle} - Google Chrome", "chrome.exe", Fresh, "Chrome"));
+    }
+
+    [Fact]
+    public void InternalPageIsAccepted_WhenTheAumidConfirmsTheProfile()
+    {
+        // being ON that profile's own new tab must still attribute normally
+        var store = new BrowserStateStore();
+        store.Update(Hb("Client A", "New Tab", "chrome://newtab/", focused: true));
+        store.LearnAumid("chrome", "Client A", "Chrome.UserData.Profile2");
+
+        var best = store.BestFor("New Tab - Google Chrome", "chrome.exe", Fresh, "Chrome.UserData.Profile2");
+
+        Assert.Equal("Client A", best!.Profile);
+    }
+
+    [Fact]
+    public void RealPageWithAMatchingTitle_IsStillRejectedWhenTheAumidContradicts()
+    {
+        // same document open in two profiles: the title matches, the window does not
+        var store = new BrowserStateStore();
+        store.Update(Hb("Client A", "ClientC_Structura - Google Slides", "https://docs.google.com/x", focused: true));
+        store.LearnAumid("chrome", "Client A", "Chrome.UserData.Profile2");
+
+        var best = store.BestFor("ClientC_Structura - Google Slides - Google Chrome", "chrome.exe",
+            Fresh, "Chrome.UserData.Profile1");
+
+        Assert.Null(best);
+    }
+
+    [Fact]
     public void ForegroundWindowWithNoMatchingTab_GetsNoBrowserState()
     {
         var store = new BrowserStateStore();
@@ -54,7 +106,7 @@ public sealed class BrowserProfileLeakTests
     }
 
     [Fact]
-    public void AumidLearnedForOneProfile_IsProofAgainstAnother()
+    public void AumidLearnedForOneProfile_RejectsAnotherProfilesWindow()
     {
         var store = new BrowserStateStore();
         store.Update(Hb("Client B", "Client B", "https://clientb.example/", focused: true));
@@ -63,31 +115,32 @@ public sealed class BrowserProfileLeakTests
         store.LearnAumid("chrome", "General", "Chrome.UserData.Profile2");
 
         // a window of profile 2 must not be credited to the instance of profile 1
-        Assert.True(store.AumidBelongsToOtherProfile("chrome", "Client B", "Chrome.UserData.Profile2"));
-        Assert.False(store.AumidBelongsToOtherProfile("chrome", "Client B", "Chrome.UserData.Profile1"));
+        Assert.False(store.AumidCompatible("chrome", "Client B", "Chrome.UserData.Profile2"));
+        Assert.True(store.AumidCompatible("chrome", "Client B", "Chrome.UserData.Profile1"));
     }
 
     [Theory]
-    // never seen (mapping still being learned) and empty (watcher gave us nothing)
-    [InlineData("Chrome.UserData.Profile9")]
-    [InlineData("")]
-    [InlineData(null)]
-    public void UnknownAumid_IsNotTreatedAsProof(string? aumid)
+    // a window we have never seen for a profile we DO know is rejected; no AUMID at all
+    // (watcher gave us nothing) can never be used to reject
+    [InlineData("Chrome.UserData.Profile9", false)]
+    [InlineData("", true)]
+    [InlineData(null, true)]
+    public void UnknownAumid_IsJudgedAgainstWhatWeKnow(string? aumid, bool expectCompatible)
     {
         var store = new BrowserStateStore();
         store.LearnAumid("chrome", "Client B", "Chrome.UserData.Profile1");
 
-        Assert.False(store.AumidBelongsToOtherProfile("chrome", "Client B", aumid));
+        Assert.Equal(expectCompatible, store.AumidCompatible("chrome", "Client B", aumid));
     }
 
     [Fact]
-    public void AumidOfAnotherBrowser_IsNotProof()
+    public void AumidOfAnotherBrowser_DoesNotRejectUs()
     {
         // Edge reports one AUMID for every profile, so it must never veto a Chrome instance
         var store = new BrowserStateStore();
         store.LearnAumid("edge", "General", "MSEdge");
 
-        Assert.False(store.AumidBelongsToOtherProfile("chrome", "Client B", "MSEdge"));
+        Assert.True(store.AumidCompatible("chrome", "Client B", "MSEdge"));
     }
 
     [Fact]

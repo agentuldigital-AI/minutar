@@ -109,6 +109,55 @@ public sealed class TitleFallbackTests
         Assert.Equal("general", project);
     }
 
+    [Theory]
+    // A profile fragment must not be found inside an unrelated document title. Client work
+    // is usually named after the client, so "Contains" made every such window that client's
+    // — in the report only, because the live engine had already been fixed (2026-08-04).
+    [InlineData("chrome.exe", "CLIENTC_DECK_VANZARE - Google Chrome")]
+    [InlineData("chrome.exe", "General Motors - stiri")]
+    [InlineData("msedge.exe", "Raport generale - Microsoft Edge")]
+    public void ReportAndLiveAgree_OnProfileFragmentsInsideTitles(string app, string title)
+    {
+        var cfg = Config();
+        cfg.Projects.Add(new ProjectConfig { Name = "Client C", BrowserProfiles = new List<string> { "Client C" } });
+
+        var live = new AttributionEngine().Attribute(
+            cfg, app, title, aumid: "", url: null, profileLabel: null, DateTimeOffset.UtcNow);
+        var report = AttributionEngine.Resolve(cfg, app, title, aumid: "", url: null, profileLabel: null);
+
+        Assert.Null(report);
+        Assert.Equal(report, live);
+    }
+
+    [Fact]
+    public void ReportAndLiveAgree_WhenTheExtensionLabelIdentifiesTheProfile()
+    {
+        var cfg = Config();
+        cfg.Projects.Add(new ProjectConfig { Name = "Client C", BrowserProfiles = new List<string> { "Client C" } });
+
+        var report = AttributionEngine.Resolve(
+            cfg, "chrome.exe", "CLIENTC_DECK_VANZARE", aumid: "", url: null, profileLabel: "Client C");
+        var live = new AttributionEngine().Attribute(
+            cfg, "chrome.exe", "CLIENTC_DECK_VANZARE", aumid: "", url: null, profileLabel: "Client C",
+            DateTimeOffset.UtcNow);
+
+        Assert.Equal("Client C", report);
+        Assert.Equal(report, live);
+    }
+
+    [Fact]
+    public void ReportAndLiveAgree_OnAnExplicitKeyword()
+    {
+        // the deliberate way to claim documents by name
+        var cfg = Config();
+        cfg.Projects.Add(new ProjectConfig { Name = "Client C", Keywords = new List<string> { "dristor" } });
+
+        var report = AttributionEngine.Resolve(
+            cfg, "chrome.exe", "CLIENTC_DECK_VANZARE - Google Chrome", aumid: "", url: null, profileLabel: null);
+
+        Assert.Equal("Client C", report);
+    }
+
     [Fact]
     public void Hold_DoesNotCarryTheProjectIntoAnotherBrowserProfile()
     {

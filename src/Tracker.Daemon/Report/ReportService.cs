@@ -538,42 +538,15 @@ public sealed class ReportService
     }
 
     /// <summary>Same precedence as the live engine, minus the hold: pins > profile > keywords.</summary>
-    private static string? ResolveProject(TrackerConfig cfg, string app, string title, string aumid, string? url, string? profile)
-    {
-        foreach (var p in cfg.Projects)
-        {
-            if (p.Apps.Any(a => a.Equals(app, StringComparison.OrdinalIgnoreCase))) return p.Name;
-            if (p.Domains.Any(d => d.Length > 0 && ClassificationEngine.MatchesDomain(d, url, title))) return p.Name;
-        }
-        if (cfg.Browser.Processes.Contains(app, StringComparer.OrdinalIgnoreCase))
-        {
-            foreach (var p in cfg.Projects)
-            {
-                foreach (var f in p.BrowserProfiles)
-                {
-                    if (string.IsNullOrWhiteSpace(f)) continue;
-                    if (profile?.Contains(f, StringComparison.OrdinalIgnoreCase) == true) return p.Name;
-                    if (aumid.Contains(f, StringComparison.OrdinalIgnoreCase)) return p.Name;
-                    if (title.Contains(f, StringComparison.OrdinalIgnoreCase)) return p.Name;
-                }
-            }
-        }
-        var hay = $"{app} {title} {url}";
-        string? best = null;
-        var bestLen = 0;
-        foreach (var p in cfg.Projects)
-        {
-            foreach (var kw in p.Keywords)
-            {
-                if (kw.Length > bestLen && AttributionEngine.ContainsWholeWord(hay, kw))
-                {
-                    best = p.Name;
-                    bestLen = kw.Length;
-                }
-            }
-        }
-        return best;
-    }
+    /// <summary>
+    /// Retroactive attribution uses the SAME rule as the live engine — see
+    /// <see cref="AttributionEngine.Resolve"/>. This used to be a second implementation and
+    /// the two drifted; the report kept matching profile fragments as substrings of any
+    /// browser title. Only the grace period stays live-only: it bridges momentary gaps in
+    /// real time, while the report sees the whole history and needs no guessing.
+    /// </summary>
+    private static string? ResolveProject(TrackerConfig cfg, string app, string title, string aumid, string? url, string? profile) =>
+        AttributionEngine.Resolve(cfg, app, title, aumid, url, profile);
 
     /// <summary>
     /// Bridges sub-3s gaps between consecutive window events: every window/tab switch loses

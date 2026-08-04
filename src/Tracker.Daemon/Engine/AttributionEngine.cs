@@ -15,14 +15,26 @@ public sealed class AttributionEngine
     private string? _lastAumid;
     private DateTimeOffset _lastMatch;
 
+    /// <summary>
+    /// The stateless attribution rule — the ONE place that decides which project a window
+    /// belongs to. The report used to carry its own copy (ReportService.ResolveProject) and
+    /// the two drifted apart: the copy still matched a profile fragment as a substring of
+    /// ANY browser title, so every window whose document was named after a client landed on
+    /// that client's project, live and report disagreeing (2026-08-04). Both call this now.
+    ///
+    /// Precedence: explicit app/domain pins &gt; browser profile &gt; keywords.
+    /// </summary>
+    public static string? Resolve(
+        TrackerConfig cfg, string app, string title, string aumid, string? url, string? profileLabel) =>
+        MatchExplicit(cfg, app, title, url, IsBrowser(cfg, app))
+        ?? MatchProfile(cfg, app, title, aumid, profileLabel)
+        ?? MatchKeywords(cfg, app, title, url);
+
     public string? Attribute(
         TrackerConfig cfg, string app, string title, string aumid,
         string? url, string? profileLabel, DateTimeOffset now)
     {
-        // precedence: explicit app/domain pins > browser profile > keywords
-        var project = MatchExplicit(cfg, app, title, url, IsBrowser(cfg, app))
-                      ?? MatchProfile(cfg, app, title, aumid, profileLabel)
-                      ?? MatchKeywords(cfg, app, title, url);
+        var project = Resolve(cfg, app, title, aumid, url, profileLabel);
         if (project is not null)
         {
             _lastProject = project;

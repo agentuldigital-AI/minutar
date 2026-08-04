@@ -26,8 +26,6 @@ public sealed class PopupWindow : Window
     private static readonly Color BtnSubtle     = Color.FromArgb(0x0F, 0xFF, 0xFF, 0xFF);
     private static readonly Color BtnSubtleHov  = Color.FromArgb(0x21, 0xFF, 0xFF, 0xFF);
     private static readonly Color BtnEdge       = Color.FromArgb(0x1C, 0xFF, 0xFF, 0xFF);
-    private static readonly Color Green         = Color.FromRgb(0x23, 0x86, 0x36);
-    private static readonly Color GreenHov      = Color.FromRgb(0x2E, 0xA0, 0x43);
     private static readonly Color Amber         = Color.FromRgb(0xFF, 0x9E, 0x57);
     private static readonly Color Track         = Color.FromArgb(0x17, 0xFF, 0xFF, 0xFF);
 
@@ -139,12 +137,11 @@ public sealed class PopupWindow : Window
         }
         panel.Children.Add(postponeRow);
 
+        // "Marchează productiv" was removed on 2026-08-04 (user decision, amends locked
+        // decision #8): a one-click escape hatch on the nag itself made it too easy to
+        // reclassify an activity just to silence the popup. Marking still exists, but only
+        // deliberately, from the dashboard's Settings page.
         var actionRow = new StackPanel { Orientation = Orientation.Horizontal };
-        actionRow.Children.Add(MakePill("✓ Marchează productiv", Green, GreenHov, null, () =>
-        {
-            actions.MarkProductive();
-            Close();
-        }, bold: true));
         actionRow.Children.Add(MakePill($"Sunt sigur ({model.SureCooldownMinutes} min liniște)", BtnSubtle, BtnSubtleHov, BtnEdge, () =>
         {
             actions.Sure();

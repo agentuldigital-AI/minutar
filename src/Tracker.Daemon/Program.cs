@@ -577,7 +577,7 @@ app.MapPost("/popup/test", () =>
     popupService.Show(
         new PopupModel("Popup de test (M3) — se închide singur în 8s", "verificare pipeline WPF",
             c.Popup.PostponeOptionsMinutes, c.Popup.SureCooldownMinutes),
-        new PopupActions(_ => { }, () => { }, () => { }));
+        new PopupActions(_ => { }, () => { }));
     _ = Task.Delay(8000).ContinueWith(_ => popupService.Hide());
     return Results.Ok(new { shown = true });
 });
@@ -664,6 +664,7 @@ app.MapPost("/browser/heartbeat", async (BrowserHeartbeat hb) =>
         // the strict proof stays whenever the SAME browser has 2+ fresh profiles
         if (!shouldWrite
             && ForegroundMatchesBrowser(curWin.App, hb.Browser)
+            && !browserStore.AumidBelongsToOtherProfile(hb.Browser, hb.Profile, curWin.Aumid)
             && browserStore.IsOnlyFreshInstanceOfBrowser(hb.Browser, hb.Profile, TimeSpan.FromSeconds(90)))
         {
             shouldWrite = true;

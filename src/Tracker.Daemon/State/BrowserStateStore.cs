@@ -24,13 +24,58 @@ public sealed class BrowserStateStore
 {
     private readonly object _lock = new();
     private readonly Dictionary<string, (BrowserHeartbeat Hb, DateTimeOffset At)> _byInstance = new();
+    private readonly Dictionary<string, HashSet<string>> _aumidsByInstance = new();
+
+    private static string KeyOf(string? browser, string? profile) => $"{browser}|{profile}";
 
     public void Update(BrowserHeartbeat hb)
     {
-        var key = $"{hb.Browser}|{hb.Profile}";
         lock (_lock)
         {
-            _byInstance[key] = (hb, DateTimeOffset.UtcNow);
+            _byInstance[KeyOf(hb.Browser, hb.Profile)] = (hb, DateTimeOffset.UtcNow);
+        }
+    }
+
+    /// <summary>
+    /// Records that this window AppUserModelID belongs to an instance, learned from a
+    /// CONFIRMED match (the foreground window title matched that instance's tab). Chrome
+    /// gives each profile its own AUMID for taskbar grouping — "Chrome.UserData.Profile1"
+    /// vs "Chrome.UserData.Profile2" — which is the only native signal that tells two
+    /// profiles of the same browser apart. Edge reports a single "MSEdge" for all profiles,
+    /// so nothing is learned there and nothing changes.
+    /// </summary>
+    public void LearnAumid(string? browser, string? profile, string? aumid)
+    {
+        if (string.IsNullOrEmpty(aumid)) return;
+        lock (_lock)
+        {
+            var key = KeyOf(browser, profile);
+            if (!_aumidsByInstance.TryGetValue(key, out var set))
+                _aumidsByInstance[key] = set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            set.Add(aumid);
+        }
+    }
+
+    /// <summary>
+    /// True only when this AUMID is KNOWN to belong to a DIFFERENT profile of the same
+    /// browser — i.e. we have positive proof the foreground window is not this instance's.
+    /// An unseen AUMID returns false, so nothing regresses while the mapping is still being
+    /// learned, or on browsers that do not vary it per profile.
+    /// </summary>
+    public bool AumidBelongsToOtherProfile(string? browser, string? profile, string? aumid)
+    {
+        if (string.IsNullOrEmpty(aumid)) return false;
+        var key = KeyOf(browser, profile);
+        var prefix = $"{browser}|";
+        lock (_lock)
+        {
+            if (_aumidsByInstance.TryGetValue(key, out var own) && own.Contains(aumid)) return false;
+            foreach (var (k, set) in _aumidsByInstance)
+            {
+                if (k == key || !k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
+                if (set.Contains(aumid)) return true;
+            }
+            return false;
         }
     }
 
@@ -96,6 +141,19 @@ public sealed class BrowserStateStore
                 .Select(v => v.Hb)
                 .FirstOrDefault();
             if (titled is not null) return titled;
+
+            // No tab matches the foreground window. With a real window title that is the
+            // signature of a browser profile WITHOUT the extension — falling back to "the
+            // freshest instance that claims focus" then hands that window another profile's
+            // identity: switching from the client profile to a plain one kept showing
+            // "Client B · Productiv" over a Calendly tab (2026-08-04). The stale claim can
+            // survive up to maxAge, because a blur report that never lands (asleep service
+            // worker, dropped request) leaves Focused=true behind.
+            //
+            // Unknown window ⇒ no browser state. It classifies on its title instead, which
+            // is honest: we genuinely do not know what that profile has open.
+            if (windowTitle.Length > 0) return null;
+
             return fresh
                 .Where(v => v.Hb.Focused)
                 .OrderByDescending(v => v.At)

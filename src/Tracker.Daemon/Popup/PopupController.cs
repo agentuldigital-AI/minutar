@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using Microsoft.Extensions.Hosting;
 using Tracker.Daemon.Engine;
 using Tracker.Daemon.Focus;
@@ -140,11 +139,6 @@ public sealed class PopupController : BackgroundService
                 }
                 Log.Info($"Popup postponed {minutes} min");
             },
-            MarkProductive: () =>
-            {
-                actionTaken = true;
-                MarkProductive(snap);
-            },
             Sure: () =>
             {
                 actionTaken = true;
@@ -172,71 +166,6 @@ public sealed class PopupController : BackgroundService
         });
     }
 
-    /// <summary>
-    /// Writes straight into tracker.toml — the SAME rules the settings page manages — so
-    /// every mark is visible and reversible in the dashboard (replaces the old hidden
-    /// exceptions.toml). YouTube stays keyword-based (whole youtube.com must not flip);
-    /// everything else flips the rule that actually fired.
-    /// </summary>
-    private void MarkProductive(EngineSnapshot snap)
-    {
-        lock (ConfigWriter.SyncRoot) // serializează load→modify→write cu endpoint-urile
-        {
-        TrackerConfig cfg;
-        try
-        {
-            // fresh load from disk: mutating _config.Current would drop settings saved moments
-            // ago (stale snapshot) AND mutate lists the engine reads concurrently on its tick
-            cfg = TrackerConfig.Load(_config.ConfigPath);
-        }
-        catch (Exception ex)
-        {
-            Log.Error("MarkProductive: config load failed — " + ex.Message);
-            return;
-        }
-        var isYoutube = snap.Title.Contains(" - YouTube", StringComparison.OrdinalIgnoreCase);
-        if (isYoutube)
-        {
-            var kw = CleanYoutubeTitle(snap.Title);
-            if (kw.Length > 0 && !cfg.YoutubeExceptions.TitleKeywords.Any(k => k.Equals(kw, StringComparison.OrdinalIgnoreCase)))
-                cfg.YoutubeExceptions.TitleKeywords.Add(kw);
-        }
-        else if (snap.MatchedRule is not null && snap.MatchedRule.StartsWith("domain:", StringComparison.Ordinal))
-        {
-            UpsertProductiveRule(cfg, "domain", snap.MatchedRule["domain:".Length..]);
-        }
-        else if (snap.MatchedRule is not null && snap.MatchedRule.StartsWith("app:", StringComparison.Ordinal))
-        {
-            UpsertProductiveRule(cfg, "app", snap.MatchedRule["app:".Length..]);
-        }
-        else
-        {
-            // title-matched (or unknown) rule: whitelist THIS page's title
-            UpsertProductiveRule(cfg, "title", TruncateForMatch(snap.Title, 60));
-        }
-        try
-        {
-            ConfigWriter.Write(cfg, _config.ConfigPath);
-        }
-        catch (Exception ex)
-        {
-            Log.Error("MarkProductive: config write failed — " + ex.Message);
-        }
-        }
-        // ConfigProvider's watcher reloads tracker.toml within ~1s → class flips productive
-        // (and retroactively in reports, which reclassify raw events with current rules)
-    }
-
-    /// <summary>Inserted at the FRONT so it beats an earlier unproductive rule of the same
-    /// match type (within a type, config order wins — ClassificationEngine.MatchRules).</summary>
-    private static void UpsertProductiveRule(TrackerConfig cfg, string match, string value)
-    {
-        if (value.Length == 0) return;
-        cfg.Classification.Rules.RemoveAll(r =>
-            r.Match == match && r.Value.Equals(value, StringComparison.OrdinalIgnoreCase));
-        cfg.Classification.Rules.Insert(0, new ClassificationRule { Class = "productive", Match = match, Value = value });
-    }
-
     /// <summary>Runs after the countdown expired: re-verifies the target is STILL the same
     /// foreground pid and still unproductive before closing anything (F4 safety).</summary>
     private async Task EnforceCloseAsync(string app, long hwnd, int pid)
@@ -261,20 +190,7 @@ public sealed class PopupController : BackgroundService
 
     private static string CooldownKey(EngineSnapshot snap) => snap.MatchedRule ?? snap.App;
 
-    private static string CleanYoutubeTitle(string title)
-    {
-        var t = Regex.Replace(title, @"^\(\d+\)\s*", ""); // "(282) " notification counter
-        var idx = t.IndexOf(" - YouTube", StringComparison.OrdinalIgnoreCase);
-        if (idx > 0) t = t[..idx];
-        return TruncateForMatch(t.Trim(), 80);
-    }
-
     private static string Truncate(string s, int max) => s.Length <= max ? s : s[..max] + "…";
-
-    /// <summary>For STORED match values: plain prefix, no "…" — a keyword ending in an
-    /// ellipsis the real title never contains would make the saved rule unmatchable (dead),
-    /// so the popup would loop forever on long titles.</summary>
-    private static string TruncateForMatch(string s, int max) => s.Length <= max ? s : s[..max];
 
     private static bool IsQuietNow(TrackerConfig cfg, DateTimeOffset localNow)
     {

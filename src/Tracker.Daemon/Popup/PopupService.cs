@@ -13,7 +13,6 @@ public sealed record PopupModel(
 
 public sealed record PopupActions(
     Action<int> Postpone,
-    Action MarkProductive,
     Action Sure,
     Action? OnCountdownExpired = null);
 

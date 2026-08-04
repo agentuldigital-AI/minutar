@@ -154,6 +154,12 @@ public sealed class RulesEngineService : BackgroundService
         var isBrowser = AttributionEngine.IsBrowser(cfg, win.App);
         var browser = isBrowser ? _browser.BestFor(win.Title, win.App, BrowserFreshness) : null;
 
+        // BestFor only resolves on a tab-title match, so this pairing is trustworthy: learn
+        // which window AUMID belongs to which profile. It is what later lets us tell two
+        // profiles of the SAME browser apart when only one of them runs the extension.
+        if (browser is not null)
+            _browser.LearnAumid(browser.Browser, browser.Profile, win.Aumid);
+
         var project = _attribution.Attribute(cfg, win.App, win.Title, win.Aumid, browser?.Url, browser?.Profile, now);
         var cls = _classification.Classify(cfg, win.App, win.Title, browser?.Url, browser?.Channel);
 

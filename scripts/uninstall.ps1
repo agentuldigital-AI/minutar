@@ -40,6 +40,20 @@ foreach ($lnkDir in @(
     }
 }
 
+# 2c. DOTNET_ROOT lasat in urma de instalarile vechi: era setat persistent si rupea ALTE
+# aplicatii .NET ale userului (nu doar ale noastre). Se sterge doar cand arata spre un folder
+# privat de dotnet — o valoare pusa deliberat de user pentru altceva ramane pe loc.
+foreach ($scope in @("User", "Machine")) {
+    $val = [Environment]::GetEnvironmentVariable("DOTNET_ROOT", $scope)
+    if (-not $val) { continue }
+    if ($val -like "*\AppData\Local\Programs\dotnet*" -or $val -like "*\AppData\Local\Microsoft\dotnet*") {
+        [Environment]::SetEnvironmentVariable("DOTNET_ROOT", $null, $scope)
+        Write-Host "Sters: variabila $scope DOTNET_ROOT ($val)"
+    } else {
+        Write-Host "PASTRAT: $scope DOTNET_ROOT = $val (nu e a noastra)"
+    }
+}
+
 # 3. binare + log-uri + stare UI/coach (%LOCALAPPDATA%\time-tracker)
 $bin = Join-Path $env:LOCALAPPDATA "time-tracker"
 if (Test-Path $bin) {
@@ -62,5 +76,5 @@ Write-Host ""
 Write-Host "Ramase MANUAL (daca e cazul):"
 Write-Host " - extensia de browser: chrome://extensions / edge://extensions -> Remove"
 Write-Host " - hook-urile Claude Code: ~/.claude/settings.json (restaureaza din .bak-ul creat de installer)"
-Write-Host " - variabila de mediu DOTNET_ROOT: partajata cu alte aplicatii .NET, NU o atingem"
+Write-Host " - .NET Desktop Runtime: partajat cu alte aplicatii, NU il atingem"
 Write-Host "Dezinstalare completa."

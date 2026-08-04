@@ -28,21 +28,48 @@ if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
 }
 
 # --- 1. Prerequisites -------------------------------------------------------
-# Prefer the user-scope SDK: "C:\Program Files\dotnet" may exist with NO SDK installed
-# (runtime-only), which breaks publish. The user-scope install also needs DOTNET_ROOT
-# so apphost exes (supervisor task!) find the runtime (else exit 0x80008096).
+# NEVER set a persistent DOTNET_ROOT here. It is a GLOBAL switch that tells every .NET
+# apphost of this user where to look for a runtime — pointing it at a private user-scope
+# folder (which only carries one version) breaks unrelated .NET apps with "You must install
+# or update .NET to run this application". Our exes need nothing: apphosts fall back to the
+# machine-wide install, verified below. The supervisor still passes DOTNET_ROOT to its CHILD
+# processes only, in their own environment block (ManagedProcess.cs) — scoped, never persisted.
 Write-Host "Running as: $env:USERNAME | LOCALAPPDATA: $env:LOCALAPPDATA"
+
+# clean up after older installs that did persist it (both hives, and only when it is a
+# private path — a DOTNET_ROOT the user set deliberately elsewhere is left alone)
+foreach ($scope in @("User", "Machine")) {
+    $stale = [Environment]::GetEnvironmentVariable("DOTNET_ROOT", $scope)
+    if (-not $stale) { continue }
+    if ($stale -like "*\AppData\Local\Programs\dotnet*" -or $stale -like "*\AppData\Local\Microsoft\dotnet*") {
+        [Environment]::SetEnvironmentVariable("DOTNET_ROOT", $null, $scope)
+        Write-Host "Removed stale $scope DOTNET_ROOT ($stale) - it broke other .NET apps"
+    } else {
+        Write-Host "NOTE: $scope DOTNET_ROOT = $stale (not ours, left untouched)"
+    }
+}
+
+# the STACK needs a machine-wide runtime, because the scheduled task launches an apphost
+# with no environment of ours. Checked explicitly so a missing runtime fails here, loudly,
+# instead of as a silent 0x80008096 at logon. (Setup.exe installs it; this dev path does not.)
+$sharedRoot = "$env:ProgramFiles\dotnet\shared"
+foreach ($fx in @("Microsoft.NETCore.App", "Microsoft.WindowsDesktop.App", "Microsoft.AspNetCore.App")) {
+    if (-not (Test-Path (Join-Path $sharedRoot "$fx\10.*"))) {
+        throw "$fx 10.x missing from $sharedRoot. Install the .NET 10 Desktop Runtime (x64) " +
+              "from https://dotnet.microsoft.com/download/dotnet/10.0 and re-run this script."
+    }
+}
+Write-Host "Machine-wide .NET 10 runtimes: OK ($sharedRoot)"
+
+# The SDK is only needed to PUBLISH. Prefer the user-scope one: "C:\Program Files\dotnet"
+# may exist with NO SDK (runtime-only). dotnet.exe locates its own runtime next to itself.
 # candidates: user-scope SDK locations, then PATH
 $candidates = @(
     (Join-Path $env:LOCALAPPDATA "Programs\dotnet\dotnet.exe"),
     (Join-Path $env:LOCALAPPDATA "Microsoft\dotnet\dotnet.exe")
 )
 $dotnet = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-if ($dotnet) {
-    $env:DOTNET_ROOT = Split-Path $dotnet
-    [Environment]::SetEnvironmentVariable("DOTNET_ROOT", $env:DOTNET_ROOT, "User")
-    Write-Host "Set user env DOTNET_ROOT -> $env:DOTNET_ROOT"
-} else {
+if (-not $dotnet) {
     $cmd = Get-Command dotnet -ErrorAction SilentlyContinue
     if (-not $cmd) { throw ".NET SDK not found - see README.md" }
     $dotnet = $cmd.Source
@@ -141,8 +168,8 @@ $settings = New-ScheduledTaskSettingsSet `
 $taskUser = $env:USERNAME
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $taskUser
 # launch the WinExe apphost directly: no console window in the taskbar (closing a console
-# would kill the whole stack). DOTNET_ROOT (user env, set above) lets the apphost find the
-# runtime; the supervisor propagates it to its children too.
+# would kill the whole stack). It resolves the runtime from the machine-wide install
+# (verified in step 1) — no environment variable is involved, for any user.
 $exe = Join-Path $binDir "Tracker.Supervisor\Tracker.Supervisor.exe"
 $action = New-ScheduledTaskAction -Execute $exe -Argument "--config `"$configPath`""
 

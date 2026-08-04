@@ -99,14 +99,37 @@ public sealed class TitleFallbackTests
         Assert.Null(project);
     }
 
-    [Fact]
-    public void ProfileFragment_StillMatchesEdgeTitleAsWholeWord()
+    [Theory]
+    // only the last-but-one segment of an Edge title names the profile
+    [InlineData("Ceva - General - Microsoft Edge")]
+    [InlineData("Raport lunar - General Work - Microsoft Edge")]
+    // Edge writes a zero-width space inside "Microsoft Edge" — real events show it
+    [InlineData("Ceva - General - Microsoft​ Edge")]
+    public void ProfileFragment_MatchesTheProfileSegmentOfAnEdgeTitle(string title)
     {
         var project = new AttributionEngine().Attribute(
-            Config(), "msedge.exe", "Ceva - General - Microsoft Edge", aumid: "", url: null,
+            Config(), "msedge.exe", title, aumid: "", url: null,
             profileLabel: null, DateTimeOffset.UtcNow);
 
         Assert.Equal("general", project);
+    }
+
+    [Theory]
+    // the profile name must not be found in the PAGE name (files named after a client)
+    [InlineData("CLIENTC_DECK_VANZARE - Profile 1 - Microsoft Edge")]
+    [InlineData("General Motors - Profile 1 - Microsoft Edge")]
+    // …nor when the title is not an Edge window title at all
+    [InlineData("General")]
+    [InlineData("Ceva - General")]
+    public void ProfileFragment_IgnoresEverythingOutsideTheProfileSegment(string title)
+    {
+        var cfg = Config();
+        cfg.Projects.Add(new ProjectConfig { Name = "Client C", BrowserProfiles = new List<string> { "Client C" } });
+
+        var project = new AttributionEngine().Attribute(
+            cfg, "msedge.exe", title, aumid: "", url: null, profileLabel: null, DateTimeOffset.UtcNow);
+
+        Assert.Null(project);
     }
 
     [Theory]

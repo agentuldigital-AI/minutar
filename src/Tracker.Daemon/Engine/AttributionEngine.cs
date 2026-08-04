@@ -92,10 +92,8 @@ public sealed class AttributionEngine
                 if (label is not null && label.Contains(frag, StringComparison.OrdinalIgnoreCase)) return p.Name;
                 if (aumid.Contains(frag, StringComparison.OrdinalIgnoreCase)) return p.Name;
                 // Edge puts the profile display name in the window title (verified live
-                // 2026-07-07) — but ONLY Edge does, and only as a whole word. A plain
-                // Contains over every browser matched "Setari generale" and "General Motors"
-                // against the profile fragment "General" (2026-08-04).
-                if (IsEdge(app) && ContainsWholeWord(title, frag)) return p.Name;
+                // 2026-07-07) — but only in one specific place, so only that place counts.
+                if (IsEdge(app) && EdgeTitleNamesProfile(title, frag)) return p.Name;
             }
         }
         return null;
@@ -125,6 +123,25 @@ public sealed class AttributionEngine
 
     private static bool IsEdge(string app) =>
         app.StartsWith("msedge", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Edge window titles end with " - &lt;profile&gt; - Microsoft Edge", so ONLY the
+    /// last-but-one segment names the profile. Searching the whole title matched the page
+    /// name instead: files called "CLIENTC_DECK_VANZARE" landed on the project whose profile
+    /// is "Client C", no matter which profile had them open (2026-08-04). Note Edge writes a
+    /// zero-width space inside "Microsoft Edge" — seen in real events, hence the strip.
+    /// </summary>
+    private static bool EdgeTitleNamesProfile(string title, string frag)
+    {
+        var parts = title.Split(" - ", StringSplitOptions.None);
+        if (parts.Length < 3) return false;
+        // strip zero-width/bidi marks: Edge really does write one inside "Microsoft Edge"
+        var tail = string.Concat(parts[^1].Where(c =>
+            System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c)
+                != System.Globalization.UnicodeCategory.Format)).Trim();
+        if (!tail.Equals("Microsoft Edge", StringComparison.OrdinalIgnoreCase)) return false;
+        return parts[^2].Contains(frag, StringComparison.OrdinalIgnoreCase);
+    }
 
     /// <summary>Whole-word match: neighbours must not be letters/digits (keywords may contain '-').</summary>
     public static bool ContainsWholeWord(string hay, string word)

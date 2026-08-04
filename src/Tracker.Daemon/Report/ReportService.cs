@@ -33,11 +33,12 @@ public sealed class ReportService
         var webTask = _aw.GetEventsRangeAsync(AwBuckets.Web(_host), from, to, ct: ct);
         var cworkTask = _aw.GetEventsRangeAsync(AwBuckets.ClaudeWork(_host), from, to, ct: ct);
         var cattnTask = _aw.GetEventsRangeAsync(AwBuckets.ClaudeAttention(_host), from, to, ct: ct);
+        var pausedTask = _aw.GetEventsRangeAsync(AwBuckets.Paused(_host), from, to, ct: ct);
         // presence/AFK context only makes sense per day — skip the extra read on long ranges
         var afkTask = to - from <= TimeSpan.FromDays(2)
             ? _aw.GetEventsRangeAsync(AwBuckets.Afk(_host), from, to, ct: ct)
             : Task.FromResult(new List<AwEvent>());
-        await Task.WhenAll(projTask, windowTask, webTask, cworkTask, cattnTask, afkTask);
+        await Task.WhenAll(projTask, windowTask, webTask, cworkTask, cattnTask, pausedTask, afkTask);
 
         // events crossing the range boundary (an AFK/video span over midnight) count only
         // their portion INSIDE [from, to] — otherwise the whole event lands in its start
@@ -47,6 +48,10 @@ public sealed class ReportService
         var web = ClipToRange(webTask.Result, from, to);
         var cwork = ClipToRange(cworkTask.Result, from, to);
         var cattn = ClipToRange(cattnTask.Result, from, to);
+        // user-requested "stop tracking" windows: reported explicitly so the missing
+        // minutes read as a deliberate pause instead of an unexplained gap
+        var pausedSec = MergeIntervals(ClipToRange(pausedTask.Result, from, to))
+            .Sum(iv => (iv.End - iv.Start).TotalSeconds);
         var afk = ClipToRange(afkTask.Result, from, to);
         var active = MergeIntervals(proj);
 
@@ -192,6 +197,7 @@ public sealed class ReportService
                 browserSeconds = Math.Round(browserSec),
                 presenceSeconds = Math.Round(presenceSec),
                 afkSeconds = Math.Round(afkSec),
+                pausedSeconds = Math.Round(pausedSec),
                 byClass = byClass.ToDictionary(kv => kv.Key, kv => Math.Round(kv.Value)),
             },
             afkTimeline = afkSegs.Select(x => new { t = x.S, d = Math.Round((x.E - x.S).TotalSeconds, 1) }),

@@ -333,6 +333,11 @@ export default function Dashboard() {
               prezent {fmt(totals!.presenceSeconds!)} · AFK {fmt(totals!.afkSeconds ?? 0)}
             </div>
           )}
+          {(totals?.pausedSeconds ?? 0) > 0 && (
+            <div className="sub" title="tracking oprit manual din tray — minutele lipsesc din totaluri intenționat">
+              ⏸ pauză {fmt(totals!.pausedSeconds!)}
+            </div>
+          )}
           <div className="sub hint-click">
             {allDetail ? "click: închide detaliile" : "click: vezi detaliile pe clase"}
           </div>

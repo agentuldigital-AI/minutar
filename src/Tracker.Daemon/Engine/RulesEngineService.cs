@@ -38,21 +38,24 @@ public sealed class RulesEngineService : BackgroundService
     private readonly WindowStateStore _window;
     private readonly BrowserStateStore _browser;
     private readonly IEventStore _store;
+    private readonly Pause.PauseService _pause;
     private readonly string _host;
     private readonly AttributionEngine _attribution = new();
     private readonly ClassificationEngine _classification = new();
 
     private volatile EngineSnapshot? _snapshot;
     private DateTimeOffset _lastProjectHeartbeat;
+    private DateTimeOffset _lastPausedHeartbeat;
 
     public RulesEngineService(
         ConfigProvider config, WindowStateStore window, BrowserStateStore browser,
-        IEventStore store, string host)
+        IEventStore store, Pause.PauseService pause, string host)
     {
         _config = config;
         _window = window;
         _browser = browser;
         _store = store;
+        _pause = pause;
         _host = host;
     }
 
@@ -96,6 +99,7 @@ public sealed class RulesEngineService : BackgroundService
             {
                 await _store.EnsureBucketAsync(AwBuckets.Project(_host), AwBuckets.ProjectType, ct);
                 await _store.EnsureBucketAsync(AwBuckets.Web(_host), AwBuckets.WebType, ct);
+                await _store.EnsureBucketAsync(AwBuckets.Paused(_host), AwBuckets.PausedType, ct);
                 return;
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -118,6 +122,28 @@ public sealed class RulesEngineService : BackgroundService
         var cfg = _config.Current;
         var now = DateTimeOffset.UtcNow;
         var (win, lastUpdate) = _window.Snapshot();
+
+        // "Oprește tracking-ul" (tray): record THAT we are paused and nothing else — no
+        // attribution, no classification, no project heartbeat. App/Title stay empty so the
+        // paused activity never even reaches the tray tooltip. Checked before the freshness
+        // guard so a pause is still reported while the watcher mirror is stale.
+        if (_pause.IsActive)
+        {
+            _snapshot = new EngineSnapshot(
+                App: "", Title: "", Project: null, Class: "paused", MatchedRule: null,
+                ExceptionApplied: false, Active: false, Afk: false, VideoOverride: false,
+                Profile: null, At: now);
+            if (_lastPausedHeartbeat > now) _lastPausedHeartbeat = default; // backward clock step
+            if (now - _lastPausedHeartbeat >= ProjectHeartbeatEvery)
+            {
+                await _store.HeartbeatAsync(
+                    AwBuckets.Paused(_host),
+                    new Dictionary<string, object?> { ["status"] = "paused" },
+                    ProjectPulsetime, ct: ct);
+                _lastPausedHeartbeat = now;
+            }
+            return;
+        }
 
         if (win is null || now - lastUpdate > WindowFreshness)
         {

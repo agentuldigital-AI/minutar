@@ -70,7 +70,7 @@ if (-not (Test-Path $configPath)) {
 $binDir = Join-Path $env:LOCALAPPDATA "time-tracker\bin"
 $stageDir = Join-Path $env:LOCALAPPDATA "time-tracker\bin-stage"
 if (Test-Path $stageDir) { Remove-Item -Recurse -Force $stageDir }
-foreach ($proj in @("Tracker.Watcher", "Tracker.Daemon", "Tracker.Supervisor")) {
+foreach ($proj in @("Tracker.Watcher", "Tracker.Daemon", "Tracker.Supervisor", "Tracker.Launcher")) {
     Write-Host "Publishing $proj (stage) ..."
     & $dotnet publish "$repo\src\$proj" -c Release -o (Join-Path $stageDir $proj) | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed for $proj (live bin untouched)" }
@@ -84,16 +84,36 @@ if ($task) {
     $task | Stop-ScheduledTask -ErrorAction SilentlyContinue
     $task | Disable-ScheduledTask | Out-Null
 }
-Get-Process Tracker.Supervisor, Tracker.Daemon, Tracker.Watcher -ErrorAction SilentlyContinue |
+Get-Process Tracker.Supervisor, Tracker.Daemon, Tracker.Watcher, Tracker.Launcher -ErrorAction SilentlyContinue |
     Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 1
 
 # swap: mirror stage -> live per componenta (robocopy: exit code <8 = succes)
-foreach ($proj in @("Tracker.Watcher", "Tracker.Daemon", "Tracker.Supervisor")) {
+foreach ($proj in @("Tracker.Watcher", "Tracker.Daemon", "Tracker.Supervisor", "Tracker.Launcher")) {
     robocopy (Join-Path $stageDir $proj) (Join-Path $binDir $proj) /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
     if ($LASTEXITCODE -ge 8) { throw "robocopy swap failed for $proj (exit $LASTEXITCODE)" }
 }
 Remove-Item -Recurse -Force $stageDir
+
+# --- 2b. Shortcuts (Start Menu + Desktop) -----------------------------------
+# They point at Tracker.Launcher.exe, NOT at the supervisor: launched from Explorer the
+# supervisor would run de-elevated (silently losing elevated-window titles) or prompt for
+# UAC every time. The launcher triggers the scheduled task instead, which elevates cleanly.
+$launcherExe = Join-Path $binDir "Tracker.Launcher\Tracker.Launcher.exe"
+$shell = New-Object -ComObject WScript.Shell
+foreach ($lnkDir in @(
+        (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"),
+        [Environment]::GetFolderPath("Desktop"))) {
+    if (-not (Test-Path $lnkDir)) { continue }
+    $lnk = $shell.CreateShortcut((Join-Path $lnkDir "Minutar.lnk"))
+    $lnk.TargetPath = $launcherExe
+    $lnk.IconLocation = "$launcherExe,0"
+    $lnk.Description = "Pornește Minutar si deschide dashboard-ul"
+    $lnk.WorkingDirectory = Split-Path $launcherExe
+    $lnk.Save()
+    Write-Host "Shortcut: $(Join-Path $lnkDir 'Minutar.lnk')"
+}
+[Runtime.InteropServices.Marshal]::ReleaseComObject($shell) | Out-Null
 
 # --- 3. Scheduled task (M6): the SUPERVISOR owns everything else -------------
 # The supervisor starts and watchdogs the watcher + daemon (decision #10),

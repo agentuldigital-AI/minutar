@@ -38,6 +38,9 @@ internal sealed class MiniBarForm : Form
     private readonly Font _fontSecondary = MakeSecondaryFont();
     private readonly ToolTip _tip = new();
     private DateTime _tipFetchedAt = DateTime.MinValue;
+    // kept in a field: a collected delegate would make the hook call into freed memory
+    private readonly WinEventProc _foregroundProc;
+    private IntPtr _foregroundHook;
 
     private bool _dragging;
     private int _dragStartX;
@@ -110,6 +113,16 @@ internal sealed class MiniBarForm : Form
         _dockTimer = new System.Windows.Forms.Timer { Interval = 2000 };
         _dockTimer.Tick += (_, _) => Redock();
         _dockTimer.Start();
+
+        // OUTOFCONTEXT delivers through this thread's message loop, so touching the form here
+        // is safe. Without it the bar would wait up to a full dock tick (2 s) to resurface.
+        _foregroundProc = (_, ev, _, _, _, _, _) =>
+        {
+            if (ev == EventSystemForeground) AssertTopmost();
+        };
+        _foregroundHook = SetWinEventHook(
+            EventSystemForeground, EventSystemForeground, IntPtr.Zero, _foregroundProc, 0, 0, WineventOutofcontext);
+
         Redock();
     }
 
@@ -180,7 +193,20 @@ internal sealed class MiniBarForm : Form
             : (tray.Width > 0 ? tray.Left - Width - 8 : bar.Right - Width - 220);
         x = Math.Max(bar.Left, Math.Min(x, bar.Right - Width));
         Location = new Point(x, y);
-        TopMost = true; // re-assert (explorer restarts, z-order churn)
+        AssertTopmost();
+    }
+
+    /// <summary>
+    /// Re-applies topmost z-order. Assigning Form.TopMost is NOT enough: WinForms skips the
+    /// SetWindowPos when the property already equals the new value, so the old `TopMost = true`
+    /// here was a no-op. Activating another app pushes its window over the bar, which then
+    /// stayed hidden until something else moved us — the "blinks on every app switch" report
+    /// (2026-08-04). Paired with the foreground hook below, the bar comes back instantly.
+    /// </summary>
+    private void AssertTopmost()
+    {
+        if (!IsHandleCreated || !Visible) return;
+        SetWindowPos(Handle, HwndTopmost, 0, 0, 0, 0, SwpNoMove | SwpNoSize | SwpNoActivate);
     }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -198,7 +224,13 @@ internal sealed class MiniBarForm : Form
 
         var hollow = !_status.Online || (_status.Afk && !_status.Active);
         var dotY = Height / 2 - 4;
-        if (hollow)
+        if (_status.Paused && _status.Online)
+        {
+            using var brush = new SolidBrush(color); // pause bars, same glyph as the tray icon
+            g.FillRectangle(brush, PadX, dotY, 3, 9);
+            g.FillRectangle(brush, PadX + 5, dotY, 3, 9);
+        }
+        else if (hollow)
         {
             using var pen = new Pen(color, 2f);
             g.DrawEllipse(pen, PadX, dotY, 8, 8);
@@ -229,6 +261,10 @@ internal sealed class MiniBarForm : Form
 
     private static (string Primary, string Secondary) SplitDisplay(LiveStatus s)
     {
+        // paused: the resume time replaces the project — nothing is being attributed anyway
+        if (s.Paused && s.Online)
+            return ("Pauză", s.PausedUntil is { } u ? $" · până la {u.ToLocalTime():HH:mm}" : "");
+
         var prefix = s.Focus ? "🎯 " : "";
         return string.IsNullOrEmpty(s.Project)
             ? (prefix + s.Label, "")
@@ -292,10 +328,34 @@ internal sealed class MiniBarForm : Form
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
 
+    private static readonly IntPtr HwndTopmost = new(-1);
+    private const uint SwpNoSize = 0x0001, SwpNoMove = 0x0002, SwpNoActivate = 0x0010;
+
+    [DllImport("user32.dll")]
+    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
+
+    private const uint EventSystemForeground = 0x0003;
+    private const uint WineventOutofcontext = 0x0000;
+
+    private delegate void WinEventProc(
+        IntPtr hook, uint ev, IntPtr hwnd, int idObject, int idChild, uint thread, uint time);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SetWinEventHook(
+        uint min, uint max, IntPtr module, WinEventProc callback, uint pid, uint thread, uint flags);
+
+    [DllImport("user32.dll")]
+    private static extern bool UnhookWinEvent(IntPtr hook);
+
     protected override void Dispose(bool disposing)
     {
         if (disposing)
         {
+            if (_foregroundHook != IntPtr.Zero)
+            {
+                UnhookWinEvent(_foregroundHook);
+                _foregroundHook = IntPtr.Zero;
+            }
             _dockTimer.Dispose();
             _pulseTimer.Dispose();
             _fontPrimary.Dispose();

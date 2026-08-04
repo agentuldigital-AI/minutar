@@ -72,7 +72,8 @@ using var teeForward = teeActive
 Tracker.Shared.Storage.IEventStore store = teeForward is not null
     ? new Tracker.Daemon.Storage.TeeEventStore(eventStore, teeForward)
     : eventStore;
-var engine = new RulesEngineService(config, windowStore, browserStore, store, host);
+var pause = new Tracker.Daemon.Pause.PauseService();
+var engine = new RulesEngineService(config, windowStore, browserStore, store, pause, host);
 var popupService = new PopupService();
 var focus = new Tracker.Daemon.Focus.FocusService(config);
 var popupController = new PopupController(config, engine, popupService, focus, windowStore);
@@ -96,7 +97,7 @@ builder.Services.AddHostedService(_ => new Tracker.Daemon.Storage.BackupService(
 var app = builder.Build();
 
 // aw-server /api/0 compat shim + parity tee (plan M2/M4)
-Tracker.Daemon.Storage.StorageEndpoints.Map(app, eventStore, host, cfg.Storage.TeeAwUrl);
+Tracker.Daemon.Storage.StorageEndpoints.Map(app, eventStore, host, cfg.Storage.TeeAwUrl, pause);
 
 // Coach v0 — day state (intent, top-3 priorities, shutdown review)
 app.MapGet("/api/day", (string? date) =>
@@ -545,6 +546,18 @@ app.MapPost("/popup/snooze", (int minutes) =>
     return Results.Ok(new { snoozedMinutes = minutes });
 });
 
+// tray "oprește tracking-ul" — a recorded pause, not a hole (see PauseService)
+app.MapPost("/tracking/pause", (int minutes) =>
+{
+    pause.Start(minutes);
+    return Results.Ok(new { paused = true, until = pause.Until });
+});
+app.MapPost("/tracking/resume", () =>
+{
+    pause.Resume();
+    return Results.Ok(new { paused = false });
+});
+
 // F4 — focus mode (strict enforcement window)
 app.MapPost("/focus/start", (int? minutes) =>
 {
@@ -572,6 +585,8 @@ app.MapPost("/popup/test", () =>
 // Claude Code hooks fire-and-forget events (decision #7) — never fail the caller
 app.MapPost("/claude/event", async (HttpRequest req) =>
 {
+    // paused means paused: Claude work is activity too and must not be recorded either
+    if (pause.IsActive) return Results.Ok();
     try
     {
         using var doc = await JsonDocument.ParseAsync(req.Body);
@@ -655,6 +670,10 @@ app.MapPost("/browser/heartbeat", async (BrowserHeartbeat hb) =>
         }
     }
 
+    // "Oprește tracking-ul": no URL/title of any tab is recorded while paused. Replays are
+    // dropped too — their timestamp may fall inside the pause window.
+    if (pause.IsActive) shouldWrite = false;
+
     if (shouldWrite)
     {
         await store.HeartbeatAsync(AwBuckets.Web(host), data, config.Current.Browser.PulsetimeSeconds,
@@ -689,6 +708,7 @@ app.MapGet("/state", () =>
         windowLastUpdate = lastUpdate,
         engine = engine.Snapshot,
         focus = new { active = focus.IsActive, until = focus.Until },
+        paused = new { active = pause.IsActive, until = pause.Until },
     });
 });
 

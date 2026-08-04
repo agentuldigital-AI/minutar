@@ -23,7 +23,9 @@ namespace Tracker.Daemon.Storage;
 /// </summary>
 public static class StorageEndpoints
 {
-    public static void Map(WebApplication app, EventStore store, string hostname, string teeAwUrl)
+    public static void Map(
+        WebApplication app, EventStore store, string hostname, string teeAwUrl,
+        Pause.PauseService pause)
     {
         var tee = string.IsNullOrWhiteSpace(teeAwUrl)
             ? null
@@ -78,6 +80,13 @@ public static class StorageEndpoints
                 return Results.BadRequest(new { error = "malformed heartbeat: " + ex.Message });
             }
 
+            // "Oprește tracking-ul": drop CONTENT writes (window titles, URLs) for the
+            // duration, but answer 200 so the watcher's retry queue does not back up and
+            // then flush the whole pause into the store the moment it ends. AFK keeps
+            // flowing — it carries no content and keeps presence continuous.
+            if (pause.IsActive && IsContentBucket(bucketId))
+                return Results.Ok();
+
             try
             {
                 await store.HeartbeatAsync(bucketId, data, pulsetime, ts, dur);
@@ -98,6 +107,11 @@ public static class StorageEndpoints
             }
             return Results.Ok();
         });
+
+        // window titles + tab URLs are the only buckets that carry what the user was doing
+        static bool IsContentBucket(string bucketId) =>
+            bucketId.StartsWith("aw-watcher-window", StringComparison.OrdinalIgnoreCase)
+            || bucketId.StartsWith("aw-watcher-web", StringComparison.OrdinalIgnoreCase);
 
         app.MapGet("/api/0/buckets/{bucketId}/events", async (string bucketId, string? start, string? end, int? limit) =>
         {

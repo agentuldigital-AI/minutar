@@ -97,24 +97,51 @@ public sealed class TrayContext : ApplicationContext
             : "Supervisor running — components: " + string.Join(", ", _components.Select(c => c.Name)));
     }
 
+    /// <summary>
+    /// Grouped menu (2026-08-04): the flat list had grown to nine peers where "Pauză
+    /// popup-uri" sat next to unrelated toggles and read as if it stopped tracking. Actions
+    /// the user reaches for daily stay at top level; the two time-boxed modes get their own
+    /// submenus, and diagnostics move out of the way.
+    /// </summary>
     private ContextMenuStrip BuildMenu(string bridge, string awUrl)
     {
         var menu = new ContextMenuStrip();
 
-        var statusItem = new ToolStripMenuItem("Status componente");
-        menu.Items.Add(statusItem);
-        menu.Opening += (_, _) =>
+        // live status header — the same text the tray tooltip carries, so a forgotten
+        // pause is visible the moment the menu opens
+        var header = new ToolStripMenuItem("—") { Enabled = false };
+        menu.Items.Add(header);
+        menu.Items.Add(new ToolStripSeparator());
+
+        menu.Items.Add("Deschide dashboard", null, (_, _) => OpenUrl(bridge));
+
+        var focusMenu = new ToolStripMenuItem("🎯 Focus");
+        focusMenu.DropDownItems.Add("25 min", null, (_, _) => _ = FocusAsync(bridge, "start?minutes=25"));
+        focusMenu.DropDownItems.Add("50 min", null, (_, _) => _ = FocusAsync(bridge, "start?minutes=50"));
+        focusMenu.DropDownItems.Add(new ToolStripSeparator());
+        focusMenu.DropDownItems.Add("Oprește focus", null, (_, _) => _ = FocusAsync(bridge, "stop"));
+        menu.Items.Add(focusMenu);
+
+        var pauseMenu = new ToolStripMenuItem("⏸ Pauză");
+        pauseMenu.DropDownItems.Add(new ToolStripMenuItem("Doar popup-uri") { Enabled = false });
+        pauseMenu.DropDownItems.Add("      30 min", null, (_, _) => _ = SnoozeAsync(bridge, 30));
+        pauseMenu.DropDownItems.Add("      60 min", null, (_, _) => _ = SnoozeAsync(bridge, 60));
+        pauseMenu.DropDownItems.Add(new ToolStripSeparator());
+        pauseMenu.DropDownItems.Add(new ToolStripMenuItem("Oprește tracking-ul") { Enabled = false });
+        foreach (var (label, minutes) in new[] { ("      15 min", 15), ("      30 min", 30), ("      1 oră", 60) })
         {
-            statusItem.DropDownItems.Clear();
-            foreach (var c in _components)
-                statusItem.DropDownItems.Add(new ToolStripMenuItem($"{c.Name}: {c.Status}") { Enabled = false });
-        };
+            var m = minutes;
+            pauseMenu.DropDownItems.Add(label, null, (_, _) => _ = PauseTrackingAsync(bridge, m));
+        }
+        var resumeItem = new ToolStripMenuItem("▶ Reia tracking-ul acum", null,
+            (_, _) => _ = ResumeTrackingAsync(bridge));
+        pauseMenu.DropDownItems.Add(new ToolStripSeparator());
+        pauseMenu.DropDownItems.Add(resumeItem);
+        menu.Items.Add(pauseMenu);
 
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Deschide dashboard", null, (_, _) => OpenUrl(bridge));
-        menu.Items.Add(new ToolStripSeparator());
+
         var miniBarItem = new ToolStripMenuItem("Mini-bar pe taskbar") { CheckOnClick = true };
-        menu.Opening += (_, _) => miniBarItem.Checked = _uiState.MiniBarVisible;
         miniBarItem.CheckedChanged += (_, _) =>
         {
             _uiState.MiniBarVisible = miniBarItem.Checked;
@@ -122,14 +149,14 @@ public sealed class TrayContext : ApplicationContext
             _miniBar.RedockNow();
         };
         menu.Items.Add(miniBarItem);
-        menu.Items.Add("Pauză popup-uri 30 min", null, (_, _) => _ = SnoozeAsync(bridge, 30));
-        menu.Items.Add("Pauză popup-uri 60 min", null, (_, _) => _ = SnoozeAsync(bridge, 60));
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("🎯 Focus 25 min", null, (_, _) => _ = FocusAsync(bridge, "start?minutes=25"));
-        menu.Items.Add("🎯 Focus 50 min", null, (_, _) => _ = FocusAsync(bridge, "start?minutes=50"));
-        menu.Items.Add("Oprește focus", null, (_, _) => _ = FocusAsync(bridge, "stop"));
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Restart componente", null, (_, _) =>
+        menu.Items.Add("Setări…", null, (_, _) => OpenUrl($"{bridge}/#settings"));
+
+        var diagMenu = new ToolStripMenuItem("🔧 Diagnostic");
+        var statusItem = new ToolStripMenuItem("Status componente");
+        diagMenu.DropDownItems.Add(statusItem);
+        diagMenu.DropDownItems.Add("Deschide log-urile", null, (_, _) => OpenUrl(LogDir()));
+        diagMenu.DropDownItems.Add(new ToolStripSeparator());
+        diagMenu.DropDownItems.Add("Restart componente", null, (_, _) =>
         {
             foreach (var c in _components)
             {
@@ -137,9 +164,41 @@ public sealed class TrayContext : ApplicationContext
                 c.EnsureStarted();
             }
         });
-        menu.Items.Add("Ieșire (oprește tot)", null, (_, _) => ExitAll());
+        menu.Items.Add(diagMenu);
+
+        menu.Items.Add(new ToolStripSeparator());
+        // A tray menu opens ANCHORED AT THE CURSOR and grows upward, so the last item lands
+        // right under the pointer — one stray click on "Ieșire" silently killed the whole
+        // stack (seen 2026-08-04: supervisor exited at 12:37, data lost until relaunch).
+        // Separator + confirmation: stopping everything must be deliberate.
+        menu.Items.Add("Ieșire (oprește tot)", null, (_, _) =>
+        {
+            var answer = MessageBox.Show(
+                "Oprești complet Minutar?\n\n" +
+                "Nu se mai înregistrează nimic până la următoarea pornire.\n" +
+                "Pentru o pauză temporară folosește „⏸ Pauză → Oprește tracking-ul”.",
+                "Minutar", MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
+                MessageBoxDefaultButton.Button2);
+            if (answer == DialogResult.Yes) ExitAll();
+        });
+
+        menu.Opening += (_, _) =>
+        {
+            var s = _poller.Current;
+            header.Text = s.Display;
+            miniBarItem.Checked = _uiState.MiniBarVisible;
+            // only offered while a pause is actually running — otherwise it is a no-op
+            // button that suggests tracking might be off when it isn't
+            resumeItem.Available = s.Paused;
+            statusItem.DropDownItems.Clear();
+            foreach (var c in _components)
+                statusItem.DropDownItems.Add(new ToolStripMenuItem($"{c.Name}: {c.Status}") { Enabled = false });
+        };
         return menu;
     }
+
+    private static string LogDir() => System.IO.Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "time-tracker", "logs");
 
     /// <summary>Mini-bar hover tooltip: today's per-class totals + focus score.</summary>
     private static async Task<string?> TodayTooltipAsync(string bridge)
@@ -223,8 +282,47 @@ public sealed class TrayContext : ApplicationContext
         }
     }
 
-    private static void OpenUrl(string url) =>
-        Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+    /// <summary>Stops recording for a while (see the daemon's PauseService). A failure must be
+    /// loud: silently staying ON while the user believes tracking stopped is the worst outcome.</summary>
+    private static async Task PauseTrackingAsync(string bridge, int minutes)
+    {
+        try
+        {
+            var resp = await Http.PostAsync($"{bridge}/tracking/pause?minutes={minutes}", null);
+            resp.EnsureSuccessStatusCode();
+        }
+        catch (Exception ex)
+        {
+            Log.Warn("Pause tracking failed: " + ex.Message);
+            MessageBox.Show(
+                $"Nu am putut opri tracking-ul ({ex.Message}).\nÎnregistrarea continuă.",
+                "Minutar", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
+
+    private static async Task ResumeTrackingAsync(string bridge)
+    {
+        try
+        {
+            await Http.PostAsync($"{bridge}/tracking/resume", null);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn("Resume tracking failed: " + ex.Message);
+        }
+    }
+
+    private static void OpenUrl(string url)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Could not open '{url}': {ex.Message}");
+        }
+    }
 
     private void ExitAll()
     {

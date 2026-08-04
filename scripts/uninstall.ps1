@@ -25,9 +25,20 @@ foreach ($t in @("TimeTracker-Supervisor", "TimeTracker-AwServer", "TimeTracker-
 }
 
 # 2. procese
-Get-Process Tracker.Supervisor, Tracker.Daemon, Tracker.Watcher -ErrorAction SilentlyContinue |
+Get-Process Tracker.Supervisor, Tracker.Daemon, Tracker.Watcher, Tracker.Launcher -ErrorAction SilentlyContinue |
     Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 1
+
+# 2b. shortcut-uri (Start Menu + Desktop)
+foreach ($lnkDir in @(
+        (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"),
+        [Environment]::GetFolderPath("Desktop"))) {
+    $lnk = Join-Path $lnkDir "Minutar.lnk"
+    if (Test-Path $lnk) {
+        Remove-Item -Force $lnk
+        Write-Host "Shortcut sters: $lnk"
+    }
+}
 
 # 3. binare + log-uri + stare UI/coach (%LOCALAPPDATA%\time-tracker)
 $bin = Join-Path $env:LOCALAPPDATA "time-tracker"

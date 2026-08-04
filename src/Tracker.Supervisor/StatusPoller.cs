@@ -4,9 +4,12 @@ using System.Text.Json;
 namespace Tracker.Supervisor;
 
 /// <summary>Live classification state, polled from the daemon's GET /state every 2 s.</summary>
-internal sealed record LiveStatus(string? Project, string Class, bool Afk, bool Active, bool Online, bool Focus = false)
+internal sealed record LiveStatus(
+    string? Project, string Class, bool Afk, bool Active, bool Online,
+    bool Focus = false, bool Paused = false, DateTimeOffset? PausedUntil = null)
 {
     public string Label => !Online ? "offline"
+        : Paused ? "Pauză"
         : Afk && !Active ? "AFK"
         : Class switch
         {
@@ -16,8 +19,11 @@ internal sealed record LiveStatus(string? Project, string Class, bool Afk, bool 
             _ => "—",
         };
 
-    public string Display =>
-        (Focus ? "🎯 " : "") + (string.IsNullOrEmpty(Project) ? Label : $"{Project} · {Label}");
+    /// <summary>A pause that silently outlived the user's memory of setting it is the main
+    /// failure mode here, so the resume time is always spelled out — never just "Pauză".</summary>
+    public string Display => Paused
+        ? "⏸ Pauză" + (PausedUntil is { } u ? $" până la {u.ToLocalTime():HH:mm}" : "")
+        : (Focus ? "🎯 " : "") + (string.IsNullOrEmpty(Project) ? Label : $"{Project} · {Label}");
 }
 
 internal sealed class StatusPoller : IDisposable
@@ -53,6 +59,17 @@ internal sealed class StatusPoller : IDisposable
                 && f.ValueKind == JsonValueKind.Object
                 && f.TryGetProperty("active", out var fa)
                 && fa.ValueKind == JsonValueKind.True;
+            var pausedActive = false;
+            DateTimeOffset? pausedUntil = null;
+            if (doc.RootElement.TryGetProperty("paused", out var pz) && pz.ValueKind == JsonValueKind.Object)
+            {
+                pausedActive = pz.TryGetProperty("active", out var pa) && pa.ValueKind == JsonValueKind.True;
+                if (pz.TryGetProperty("until", out var pu) && pu.ValueKind == JsonValueKind.String
+                    && pu.TryGetDateTimeOffset(out var until))
+                {
+                    pausedUntil = until;
+                }
+            }
             if (doc.RootElement.TryGetProperty("engine", out var e) && e.ValueKind == JsonValueKind.Object)
             {
                 var project = e.TryGetProperty("project", out var p) && p.ValueKind == JsonValueKind.String
@@ -63,12 +80,12 @@ internal sealed class StatusPoller : IDisposable
                     : "neutral";
                 var afk = e.TryGetProperty("afk", out var a) && a.ValueKind == JsonValueKind.True;
                 var active = e.TryGetProperty("active", out var ac) && ac.ValueKind == JsonValueKind.True;
-                Current = new LiveStatus(project, cls, afk, active, true, focusActive);
+                Current = new LiveStatus(project, cls, afk, active, true, focusActive, pausedActive, pausedUntil);
             }
             else
             {
                 // daemon up but watcher mirror stale — no classification available
-                Current = new LiveStatus(null, "unknown", false, false, true, focusActive);
+                Current = new LiveStatus(null, "unknown", false, false, true, focusActive, pausedActive, pausedUntil);
             }
         }
         catch

@@ -22,7 +22,8 @@ Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 UninstallDisplayName=Minutar
-UninstallDisplayIcon={app}\bin\Tracker.Supervisor\Tracker.Supervisor.exe
+UninstallDisplayIcon={app}\bin\Tracker.Launcher\Tracker.Launcher.exe
+SetupIconFile=..\assets\app.ico
 CloseApplications=no
 
 [Languages]
@@ -40,8 +41,16 @@ Source: "staging\config\tracker.toml"; DestDir: "{localappdata}\TimeTracker"; \
 [Icons]
 ; autostart NE-elevat: shortcut în folderul Startup al userului (zero UAC)
 Name: "{userstartup}\Minutar"; Filename: "{app}\bin\Tracker.Supervisor\Tracker.Supervisor.exe"
-Name: "{userprograms}\Minutar"; Filename: "{app}\bin\Tracker.Supervisor\Tracker.Supervisor.exe"
+; shortcut-urile pe care le apasă omul trec prin launcher: pornește stack-ul dacă e oprit,
+; altfel doar deschide dashboard-ul — clic repetat e sigur (spre deosebire de exe-ul direct)
+Name: "{userprograms}\Minutar"; Filename: "{app}\bin\Tracker.Launcher\Tracker.Launcher.exe"
+; userdesktop, NOT commondesktop: PrivilegesRequired=lowest has no rights to the shared one
+Name: "{userdesktop}\Minutar"; Filename: "{app}\bin\Tracker.Launcher\Tracker.Launcher.exe"; \
+  Tasks: desktopicon
 Name: "{userprograms}\Minutar Dashboard"; Filename: "http://localhost:5601"
+
+[Tasks]
+Name: "desktopicon"; Description: "Creează o scurtătură pe Desktop"; GroupDescription: "Scurtături:"
 
 [Run]
 Filename: "{app}\bin\Tracker.Supervisor\Tracker.Supervisor.exe"; \

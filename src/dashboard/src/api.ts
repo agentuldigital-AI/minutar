@@ -44,6 +44,7 @@ export interface Report {
     browserSeconds: number;
     presenceSeconds?: number;
     afkSeconds?: number;
+    pausedSeconds?: number;
     byClass: Record<string, number>;
   };
   afkTimeline?: { t: string; d: number }[];

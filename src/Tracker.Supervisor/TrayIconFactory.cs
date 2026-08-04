@@ -19,11 +19,13 @@ internal static class TrayIconFactory
     public static readonly Color Unproductive = ColorTranslator.FromHtml("#d03b3b");
     public static readonly Color Neutral = ColorTranslator.FromHtml("#a3a29e");
     public static readonly Color Offline = ColorTranslator.FromHtml("#6f6e6a");
+    public static readonly Color Paused = ColorTranslator.FromHtml("#e0a63c");
 
     private static Icon? _icon;
     private static IntPtr _handle;
 
     public static Color ClassColor(LiveStatus s) => !s.Online ? Offline
+        : s.Paused ? Paused
         : s.Class switch
         {
             "productive" => Productive,
@@ -39,7 +41,15 @@ internal static class TrayIconFactory
         {
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.Clear(Color.Transparent);
-            if (!s.Online || (s.Afk && !s.Active))
+            if (s.Paused && s.Online)
+            {
+                // amber pause glyph: distinct SHAPE, not just another colored dot — the state
+                // is easy to forget and must not be mistaken for "neutral" at a glance
+                using var brush = new SolidBrush(color);
+                g.FillRectangle(brush, 4, 3, 3, 10);
+                g.FillRectangle(brush, 9, 3, 3, 10);
+            }
+            else if (!s.Online || (s.Afk && !s.Active))
             {
                 using var pen = new Pen(color, 2.5f);
                 g.DrawEllipse(pen, 3, 3, 10, 10); // hollow = AFK / offline

@@ -249,17 +249,24 @@ export default function Dashboard() {
     const ph = report?.phone;
     if (!report || !ph || ph.totalMinutes <= 0 || mode === "day") return null;
 
-    // Apple raportează un total MAI MIC decât suma aplicațiilor (un site se numără și
-    // singur, și în browserul care l-a deschis). Punem proporțiile aplicațiilor pe
-    // totalul lui: așa părțile adună exact totalul, în loc să-l depășească.
-    const scale = ph.appsSumMinutes > 0 ? ph.totalMinutes / ph.appsSumMinutes : 0;
-    const sec = (minutes: number) => Math.round(minutes * 60 * scale);
+    // Suma aplicațiilor din Screen Time NU e egală cu totalul afișat de Apple, iar
+    // raportul nu e stabil: verificat pe trei perioade reale, aplicațiile au ieșit cu
+    // 9% SUB total într-o zi și cu 38% PESTE în alta (26 iulie: Safari 1h17m + 9GAG
+    // 1h1m depășeau singure totalul zilei de 2h10m). Orice regulă fixă de reconciliere
+    // ar fi o inventie. Deci:
+    //   • totalul = cifra Apple, neatinsă;
+    //   • cifrele per aplicație = brute, neatinse (vezi clasamentele mai jos);
+    //   • defalcarea pe clase = DOAR proporții, aplicate pe totalul Apple, marcate „≈",
+    //     fiindcă Apple nu ofera nicio alta cale de a imparti totalul pe clase.
+    const shareOf = (minutes: number) => (ph.appsSumMinutes > 0 ? minutes / ph.appsSumMinutes : 0);
+    const estSec = (minutes: number) => Math.round(shareOf(minutes) * ph.totalMinutes * 60);
 
     const pcByClass = report.totals.byClass ?? {};
     const classes = (["productive", "neutral", "unproductive"] as ClassName[]).map((cls) => ({
       cls,
       pc: pcByClass[cls] ?? 0,
-      phone: sec(ph.byClass?.[cls] ?? 0),
+      phone: estSec(ph.byClass?.[cls] ?? 0),
+      phonePct: Math.round(shareOf(ph.byClass?.[cls] ?? 0) * 100),
     }));
 
     // în listele Screen Time, site-urile stau lângă aplicații („mediafax.ro" lângă
@@ -278,7 +285,9 @@ export default function Dashboard() {
       for (const a of phone) {
         const k = key(a.name);
         const e = map.get(k) ?? { name: a.name, seconds: 0, pc: false, phone: false };
-        e.seconds += sec(a.minutes);
+        // brut, exact cum îl dă Apple — clasamentul răspunde la „cât zice Apple că am
+        // stat pe X", nu la „ce parte din total"; acolo unde ajustăm, spunem explicit
+        e.seconds += a.minutes * 60;
         e.phone = true;
         map.set(k, e);
       }
@@ -294,7 +303,12 @@ export default function Dashboard() {
       phoneSeconds,
       totalSeconds: report.totals.activeSeconds + phoneSeconds,
       classes,
-      unclassified: sec(ph.unclassifiedMinutes),
+      unclassified: estSec(ph.unclassifiedMinutes),
+      unclassifiedPct: Math.round(shareOf(ph.unclassifiedMinutes) * 100),
+      // diferența dintre suma aplicațiilor și totalul Apple, ca s-o putem ARĂTA
+      gapMinutes: ph.appsSumMinutes - ph.totalMinutes,
+      appsSumMinutes: ph.appsSumMinutes,
+      phoneTotalMinutes: ph.totalMinutes,
       apps: merge(report.byApp ?? [], ph.apps.filter((a) => !isSite(a.name))),
       sites: merge(report.byDomain ?? [], ph.apps.filter((a) => isSite(a.name))),
     };
@@ -606,9 +620,9 @@ export default function Dashboard() {
         <section className="card">
           <h2>Total pe dispozitive</h2>
           <p className="hint">
-            PC + telefon la un loc. Bara plină = PC, partea transparentă = telefon.
-            Screen Time vine pe săptămâni întregi, de aceea blocul apare doar pe
-            săptămână și lună.
+            PC + telefon la un loc. Bara plină = PC (cronometrat de noi), partea
+            transparentă = telefon (raportat de Apple). Screen Time vine pe săptămâni
+            întregi, de aceea blocul apare doar pe săptămână și lună.
           </p>
 
           <div className="dev-total">
@@ -617,6 +631,24 @@ export default function Dashboard() {
               PC {fmt(combined.pcSeconds)} · telefon {fmt(combined.phoneSeconds)}
             </span>
           </div>
+
+          <p className="hint" style={{ marginTop: 8 }}>
+            Rândurile de mai jos împart totalul telefonului după <b>proporțiile</b>{" "}
+            aplicațiilor, de aceea sunt marcate „≈": Apple nu spune cât din total a fost
+            productiv sau nu.{" "}
+            {combined.gapMinutes !== 0 ? (
+              <>
+                Cifrele lui nici nu se închid între ele — aplicațiile adună{" "}
+                <b>{fmtMin(combined.appsSumMinutes)}</b> față de totalul de{" "}
+                <b>{fmtMin(combined.phoneTotalMinutes)}</b>
+                {" ("}
+                {combined.gapMinutes > 0 ? "+" : ""}
+                {Math.round((combined.gapMinutes / combined.phoneTotalMinutes) * 100)}%).
+                Nu le „reparăm": totalul rămâne cifra lui, iar în clasamente aplicațiile
+                rămân exact cum le dă el.
+              </>
+            ) : null}
+          </p>
 
           <div className="barlist" style={{ marginTop: 12 }}>
             {combined.classes.map((r) => {
@@ -646,8 +678,15 @@ export default function Dashboard() {
                       }}
                     />
                   </span>
-                  <span className="val" title={`PC ${fmt(r.pc)} · telefon ${fmt(r.phone)}`}>
-                    {fmt(tot)} · {Math.round(pct)}%
+                  <span
+                    className="val"
+                    title={
+                      r.phone > 0
+                        ? `PC ${fmt(r.pc)} (măsurat) · telefon ≈${fmt(r.phone)} = ${r.phonePct}% din timpul de telefon`
+                        : `PC ${fmt(r.pc)} (măsurat)`
+                    }
+                  >
+                    {r.phone > 0 ? "≈" : ""}{fmt(tot)} · {Math.round(pct)}%
                   </span>
                 </div>
               );
@@ -665,7 +704,12 @@ export default function Dashboard() {
                     }}
                   />
                 </span>
-                <span className="val">{fmt(combined.unclassified)}</span>
+                <span
+                  className="val"
+                  title={`${combined.unclassifiedPct}% din timpul de telefon, în aplicații fără clasă`}
+                >
+                  ≈{fmt(combined.unclassified)}
+                </span>
               </div>
             ) : null}
           </div>
@@ -700,6 +744,11 @@ export default function Dashboard() {
             {(["productive", "neutral", "unproductive"] as ClassName[]).map((cls) => {
               const v = report.phone!.byClass?.[cls] ?? 0;
               if (v <= 0) return null;
+              // procentul e cifra de încredere aici: minutele vin din lista de aplicații,
+              // a cărei sumă nu e egală cu totalul de mai sus
+              const pct = report.phone!.appsSumMinutes > 0
+                ? Math.round((v / report.phone!.appsSumMinutes) * 100)
+                : 0;
               return (
                 <div className="phone-list-row" key={cls}>
                   <span>
@@ -710,7 +759,10 @@ export default function Dashboard() {
                     />
                     {CLASS_LABEL[cls]}
                   </span>
-                  <span className="val">{fmtMin(v)}</span>
+                  <span className="val">
+                    <b>{pct}%</b>
+                    <span className="meta">{fmtMin(v)} după cifrele Apple</span>
+                  </span>
                 </div>
               );
             })}
@@ -720,7 +772,15 @@ export default function Dashboard() {
                   neclasificat
                   <span className="meta">clasifică-le în pagina Telefon</span>
                 </span>
-                <span className="val">{fmtMin(report.phone.unclassifiedMinutes)}</span>
+                <span className="val">
+                  <b>
+                    {report.phone.appsSumMinutes > 0
+                      ? Math.round((report.phone.unclassifiedMinutes / report.phone.appsSumMinutes) * 100)
+                      : 0}
+                    %
+                  </b>
+                  <span className="meta">{fmtMin(report.phone.unclassifiedMinutes)} după cifrele Apple</span>
+                </span>
               </div>
             ) : null}
           </div>
@@ -753,11 +813,14 @@ export default function Dashboard() {
             </>
           ) : null}
 
-          {report.phone.appsSumMinutes > report.phone.totalMinutes ? (
+          {report.phone.appsSumMinutes !== report.phone.totalMinutes ? (
             <p className="hint" style={{ marginTop: 10 }}>
-              Suma aplicațiilor ({fmtMin(report.phone.appsSumMinutes)}) depășește totalul raportat
-              de Apple ({fmtMin(report.phone.totalMinutes)}): site-urile se numără și separat, și
-              în browser. Totalul e cifra de încredere; aplicațiile arată proporțiile.
+              Cifrele Apple nu se închid între ele: aplicațiile adună{" "}
+              {fmtMin(report.phone.appsSumMinutes)}, iar totalul afișat e{" "}
+              {fmtMin(report.phone.totalMinutes)}. Diferența nu are un sens constant — pe date
+              reale a ieșit și în plus, și în minus — așa că nu o „reparăm": totalul rămâne cifra
+              Apple, aplicațiile rămân exact cum le dă Apple, iar procentele de mai sus sunt
+              partea în care poți avea încredere.
             </p>
           ) : null}
         </section>

@@ -506,7 +506,13 @@ footer { margin-top: 30px; font-size: 12px; color: var(--text-secondary); displa
   padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 13.5px;
 }
 .phone-list-row:last-child { border-bottom: none; }
-.phone-list-row .val { color: var(--text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.phone-list-row .val {
+  color: var(--text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap;
+  display: flex; align-items: baseline; gap: 8px;
+}
+/* procentul e cifra de incredere, minutele Apple sunt contextul — de aceea procentul
+   e bold si in culoarea textului normal, iar minutele raman secundare */
+.phone-list-row .val b { color: var(--text-primary); }
 .phone-list-row .meta { color: var(--text-secondary); font-size: 12.5px; margin-left: 8px; }
 
 /* ---- total pe dispozitive (PC + telefon) ---- */

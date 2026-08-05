@@ -58,6 +58,27 @@ export interface Report {
   heatmap: HeatmapRow[];
   timeline: TimelineSegment[];
   timelineTruncated: boolean;
+  /** Timp de pe telefon (import Screen Time) — ținut separat de activeSeconds. */
+  phone?: PhoneSummary;
+}
+
+export interface PhoneSummary {
+  totalMinutes: number;
+  byClass: Record<string, number>;
+  byProject: Record<string, number>;
+  unclassifiedMinutes: number;
+  apps: { name: string; minutes: number }[];
+  appsSumMinutes: number;
+  periods: {
+    device: string;
+    from: string;
+    to: string;
+    totalMinutes: number;
+    avgDailyMinutes: number;
+    pickups: number | null;
+    notifications: number | null;
+    source: string;
+  }[];
 }
 
 export async function fetchReport(from: Date, to: Date): Promise<Report> {
@@ -412,5 +433,81 @@ export async function saveConfig(cfg: ConfigData): Promise<void> {
   if (!resp.ok) {
     const body = await resp.json().catch(() => null);
     throw new Error(body?.error ?? `save ${resp.status}`);
+  }
+}
+
+// ---- timp pe telefon (import manual/asistat) ----
+// iOS nu permite export de Screen Time, deci cifrele vin din capturi de ecran citite de
+// un LLM ales de utilizator. Aplicația nu vorbește cu niciun LLM: primește doar JSON-ul.
+
+export interface PhoneApp {
+  name: string;
+  minutes: number;
+}
+
+export interface PhoneWeek {
+  device: string;
+  from: string;
+  to: string;
+  totalMinutes: number;
+  avgDailyMinutes: number;
+  apps: PhoneApp[];
+  pickups: number | null;
+  notifications: number | null;
+  source: string;
+  recordedAt: string;
+}
+
+export async function fetchPhoneWeeks(): Promise<PhoneWeek[]> {
+  const resp = await fetch("/api/phone/usage");
+  if (!resp.ok) throw new Error(`phone ${resp.status}`);
+  const body = await resp.json();
+  return body.weeks ?? [];
+}
+
+export async function savePhoneWeek(week: {
+  device?: string;
+  from: string;
+  to: string;
+  totalMinutes: number;
+  apps?: PhoneApp[];
+  pickups?: number | null;
+  notifications?: number | null;
+  source?: string;
+}): Promise<void> {
+  const resp = await fetch("/api/phone/usage", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(week),
+  });
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => null);
+    throw new Error(body?.error ?? `import ${resp.status}`);
+  }
+}
+
+/** Aplicații de telefon văzute în importuri care nu au încă o clasă. */
+export interface UnclassifiedPhone {
+  apps: { name: string; minutes: number }[];
+  projects: string[];
+}
+
+export async function fetchUnclassifiedPhoneApps(): Promise<UnclassifiedPhone> {
+  const resp = await fetch("/api/phone/unclassified");
+  if (!resp.ok) throw new Error(`unclassified ${resp.status}`);
+  return resp.json();
+}
+
+export async function classifyPhoneApps(
+  apps: { name: string; class: string; project?: string }[],
+): Promise<void> {
+  const resp = await fetch("/api/phone/classify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ apps }),
+  });
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => null);
+    throw new Error(body?.error ?? `classify ${resp.status}`);
   }
 }

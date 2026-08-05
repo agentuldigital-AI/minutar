@@ -1,15 +1,17 @@
 import { useEffect, useState } from "react";
 import Dashboard from "./Dashboard";
 import Journal from "./Journal";
+import Phone from "./Phone";
 import Settings from "./Settings";
 import Weekly from "./Weekly";
 
-type View = "dash" | "weekly" | "journal" | "settings";
+type View = "dash" | "weekly" | "journal" | "phone" | "settings";
 
 function viewFromHash(): View {
   if (window.location.hash === "#settings") return "settings";
   if (window.location.hash === "#weekly") return "weekly";
   if (window.location.hash === "#journal") return "journal";
+  if (window.location.hash === "#phone") return "phone";
   return "dash";
 }
 
@@ -44,12 +46,25 @@ export default function App() {
           <button className={view === "journal" ? "active" : ""} onClick={() => go("journal")}>
             Jurnal
           </button>
+          <button className={view === "phone" ? "active" : ""} onClick={() => go("phone")}>
+            Telefon
+          </button>
           <button className={view === "settings" ? "active" : ""} onClick={() => go("settings")}>
             Setări
           </button>
         </nav>
       </header>
-      {view === "dash" ? <Dashboard /> : view === "weekly" ? <Weekly /> : view === "journal" ? <Journal /> : <Settings />}
+      {view === "dash" ? (
+        <Dashboard />
+      ) : view === "weekly" ? (
+        <Weekly />
+      ) : view === "journal" ? (
+        <Journal />
+      ) : view === "phone" ? (
+        <Phone />
+      ) : (
+        <Settings />
+      )}
     </div>
   );
 }

@@ -4,9 +4,15 @@ using Tracker.Shared.Logging;
 
 namespace Tracker.Daemon.Popup;
 
+/// <summary>
+/// Two lines, deliberately. The popup used to carry a title, a message, the process name and
+/// a "(regulă: domain:youtube.com)" line — the same fact three times, plus jargon, on a big
+/// dark card (user feedback, 2026-08-05). <paramref name="Message"/> leads;
+/// <paramref name="ContextText"/> is the one quiet line of measured fact under it.
+/// </summary>
 public sealed record PopupModel(
-    string ActivityText,
-    string StreakText,
+    string Message,
+    string ContextText,
     IReadOnlyList<int> PostponeOptionsMinutes,
     int SureCooldownMinutes,
     int? CountdownSeconds = null);
@@ -14,7 +20,8 @@ public sealed record PopupModel(
 public sealed record PopupActions(
     Action<int> Postpone,
     Action Sure,
-    Action? OnCountdownExpired = null);
+    Action? OnCountdownExpired = null,
+    Action? Dismiss = null);
 
 /// <summary>
 /// Hosts WPF on a dedicated STA thread (the daemon's main thread runs Kestrel).

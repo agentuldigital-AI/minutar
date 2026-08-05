@@ -20,6 +20,7 @@ public sealed class TrackerConfig
     public AttributionConfig Attribution { get; set; } = new();
     public List<ProjectConfig> Projects { get; set; } = new();
     public List<AssignmentConfig> Assignments { get; set; } = new();
+    public List<PhoneAppConfig> PhoneApps { get; set; } = new();
     public ClassificationConfig Classification { get; set; } = new();
     public YoutubeExceptionsConfig YoutubeExceptions { get; set; } = new();
     public SupervisorConfig Supervisor { get; set; } = new();
@@ -84,6 +85,13 @@ public sealed class TrackerConfig
         Require(Popup.GraceSeconds >= 5, "popup.grace_seconds must be >= 5");
         Require(Popup.PostponeOptionsMinutes.All(m => m >= 1), "popup.postpone_options_minutes must all be >= 1");
         Require(Popup.RenagMinutesDefault >= 1, "popup.renag_minutes_default must be >= 1");
+        Require(Popup.DismissMinutes >= 1, "popup.dismiss_minutes must be >= 1");
+        foreach (var p in PhoneApps)
+        {
+            Require(p.Name.Trim().Length > 0, "phone_apps.name nu poate fi gol");
+            Require(p.Class is "productive" or "neutral" or "unproductive",
+                $"phone_apps.class invalid pentru „{p.Name}”: {p.Class}");
+        }
         Require(Popup.SureCooldownMinutes >= 1, "popup.sure_cooldown_minutes must be >= 1");
         Require(Attribution.HoldSeconds >= 0, "attribution.hold_seconds must be >= 0");
         Require(Supervisor.CheckSeconds >= 5, "supervisor.check_seconds must be >= 5");
@@ -174,6 +182,11 @@ public sealed class PopupConfig
     public int GraceSeconds { get; set; } = 30;
     public List<int> PostponeOptionsMinutes { get; set; } = new() { 5, 10, 30 };
     public int RenagMinutesDefault { get; set; } = 10;
+
+    /// <summary>The "X" in the corner: read it, close it, no commitment. It still needs a
+    /// floor — with zero the popup would come back on the next tick, a second later — so
+    /// this is the shortest silence that makes closing meaningful.</summary>
+    public int DismissMinutes { get; set; } = 2;
     public int SureCooldownMinutes { get; set; } = 60;
     public List<string> QuietHours { get; set; } = new();
 }
@@ -186,6 +199,21 @@ public sealed class VideoConfig
 public sealed class AttributionConfig
 {
     public int HoldSeconds { get; set; } = 20;
+}
+
+/// <summary>
+/// Cum se contorizează o aplicație de pe telefon. Numele vin din Screen Time („WhatsApp",
+/// „9GAG") și NU se potrivesc cu regulile de pe PC, care lucrează cu procese
+/// („WhatsApp.Root.exe") și domenii („9gag.com") — de aceea au lista lor, completată o
+/// singură dată pe aplicație, la importul în care apare prima oară.
+/// </summary>
+public sealed class PhoneAppConfig
+{
+    public string Name { get; set; } = "";
+    public string Class { get; set; } = "neutral";
+
+    /// <summary>Opțional: timpul acelei aplicații se atribuie unui proiect.</summary>
+    public string Project { get; set; } = "";
 }
 
 public sealed class ProjectConfig

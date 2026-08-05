@@ -34,6 +34,8 @@ public sealed class ReportService
         var cworkTask = _aw.GetEventsRangeAsync(AwBuckets.ClaudeWork(_host), from, to, ct: ct);
         var cattnTask = _aw.GetEventsRangeAsync(AwBuckets.ClaudeAttention(_host), from, to, ct: ct);
         var pausedTask = _aw.GetEventsRangeAsync(AwBuckets.Paused(_host), from, to, ct: ct);
+        // timp de pe telefon: citit separat, expus separat — vezi PhoneUsage
+        var phoneTask = PhoneUsage.ReadAsync(_aw, _host, from, to, ct);
         // presence/AFK context only makes sense per day — skip the extra read on long ranges
         var afkTask = to - from <= TimeSpan.FromDays(2)
             ? _aw.GetEventsRangeAsync(AwBuckets.Afk(_host), from, to, ct: ct)
@@ -221,6 +223,9 @@ public sealed class ReportService
             heatmap = BuildHeatmapSlices(slices, from),
             timeline,
             timelineTruncated = timelineRuns.Count > timelineCap,
+            // bloc propriu: NU intră în activeSeconds și nu se amestecă în byClass de mai
+            // sus — unul e cronometrat de noi, celălalt raportat de Apple
+            phone = PhoneUsage.Summarize(await phoneTask, _config.Current),
         };
     }
 

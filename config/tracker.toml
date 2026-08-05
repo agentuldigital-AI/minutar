@@ -38,6 +38,9 @@ jsonl_fallback              = true
 grace_seconds            = 300
 postpone_options_minutes = [5, 15, 30]
 renag_minutes_default    = 10
+# X-ul din colț: citești mesajul și închizi, fără să promiți nimic. Are totuși un minim,
+# altfel popup-ul ar reveni la următoarea secundă.
+dismiss_minutes          = 2
 sure_cooldown_minutes    = 60
 quiet_hours              = ["22:30-08:00"]
 
@@ -178,3 +181,12 @@ value = "Claude.exe"
 [youtube_exceptions]
 title_keywords = ["tutorial", "curs", "documentar", "documentary", "course"]
 channels       = []
+
+# --- Aplicații de telefon (Screen Time importat manual) -----------------------------
+# Se completează singur din pagina „Telefon" a dashboard-ului, la fiecare import în care
+# apare o aplicație neclasificată. Numele = exact cel din Screen Time. `project` e opțional.
+#
+# [[phone_apps]]
+# name    = "Slack"
+# class   = "productive"   # productive | neutral | unproductive
+# project = "Client A"

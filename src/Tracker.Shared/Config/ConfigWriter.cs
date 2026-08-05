@@ -81,6 +81,7 @@ public static class ConfigWriter
         sb.AppendLine($"grace_seconds            = {c.Popup.GraceSeconds}");
         sb.AppendLine($"postpone_options_minutes = [{string.Join(", ", c.Popup.PostponeOptionsMinutes)}]");
         sb.AppendLine($"renag_minutes_default    = {c.Popup.RenagMinutesDefault}");
+        sb.AppendLine($"dismiss_minutes          = {c.Popup.DismissMinutes}");
         sb.AppendLine($"sure_cooldown_minutes    = {c.Popup.SureCooldownMinutes}");
         sb.AppendLine($"quiet_hours              = {Arr(c.Popup.QuietHours)}");
         sb.AppendLine();
@@ -186,6 +187,17 @@ public static class ConfigWriter
             if (a.To.Length > 0) sb.AppendLine($"to      = {Q(a.To)}");
             if (a.Project.Length > 0) sb.AppendLine($"project = {Q(a.Project)}");
             if (a.Class.Length > 0) sb.AppendLine($"class   = {Q(a.Class)}");
+        }
+
+        // aplicații de telefon (import Screen Time): nume așa cum le scrie iOS, cu clasa
+        // aleasă o singură dată de utilizator; regulile de PC nu li se potrivesc
+        foreach (var p in c.PhoneApps.Where(p => p.Name.Trim().Length > 0))
+        {
+            sb.AppendLine();
+            sb.AppendLine("[[phone_apps]]");
+            sb.AppendLine($"name    = {Q(p.Name)}");
+            sb.AppendLine($"class   = {Q(p.Class)}");
+            if (p.Project.Length > 0) sb.AppendLine($"project = {Q(p.Project)}");
         }
         return sb.ToString();
     }

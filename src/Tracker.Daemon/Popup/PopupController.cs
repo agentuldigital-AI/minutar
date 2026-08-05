@@ -20,21 +20,28 @@ public sealed class PopupController : BackgroundService
     private readonly PopupService _popup;
     private readonly FocusService _focus;
     private readonly WindowStateStore _window;
+    private readonly Coach.DayStateStore _days;
+    private readonly PopupMessagePicker _messages = new();
     private readonly object _lock = new();
 
     private int _unproductiveStreak;
     private DateTimeOffset _snoozeUntil;
     private readonly Dictionary<string, DateTimeOffset> _cooldowns = new();
+    // per-activity tally for the day, so a message can say "third time today" and how long
+    // in total — reset on the first popup of a new local day
+    private readonly Dictionary<string, (int Times, int Seconds)> _todayTally = new(StringComparer.Ordinal);
+    private string _tallyDate = "";
 
     public PopupController(
         ConfigProvider config, RulesEngineService engine, PopupService popup,
-        FocusService focus, WindowStateStore window)
+        FocusService focus, WindowStateStore window, Coach.DayStateStore days)
     {
         _config = config;
         _engine = engine;
         _popup = popup;
         _focus = focus;
         _window = window;
+        _days = days;
     }
 
     /// <summary>Tray "pause popups" (M6) sets this via the bridge.</summary>
@@ -121,9 +128,14 @@ public sealed class PopupController : BackgroundService
             : 0;
 
         Log.Info($"Popup firing: {_unproductiveStreak}s unproductive on {snap.App} (rule {snap.MatchedRule ?? "?"}){(countdown is not null ? $" — FOCUS close in {countdown}s" : "")}");
+        // one quiet line of fact: what and for how long. The process name and the matched
+        // rule stay in the log — they are for debugging, not for the person being nudged.
+        var site = PopupMessagePicker.SiteNameOf(snap.MatchedRule, snap.App);
+        var mins = _unproductiveStreak / 60;
+        var duration = mins >= 1 ? $"{mins} min" : $"{_unproductiveStreak}s";
         var model = new PopupModel(
-            ActivityText: $"{snap.App} — {Truncate(snap.Title, 140)}",
-            StreakText: $"Activitate neproductivă de {_unproductiveStreak / 60}m {_unproductiveStreak % 60}s (regulă: {snap.MatchedRule ?? "?"})",
+            Message: BuildMessage(snap, key),
+            ContextText: $"{site} · {duration}",
             PostponeOptionsMinutes: cfg.Popup.PostponeOptionsMinutes,
             SureCooldownMinutes: cfg.Popup.SureCooldownMinutes,
             CountdownSeconds: countdown);
@@ -152,6 +164,18 @@ public sealed class PopupController : BackgroundService
             {
                 actionTaken = true; // enforcement takes over — no implicit re-nag snooze
                 _ = EnforceCloseAsync(snap.App, hwndAtShow, pidAtShow);
+            },
+            // the X: closing without choosing anything. Still a floor, or the popup would
+            // reappear on the next tick — but the shortest one, and nothing is promised.
+            Dismiss: () =>
+            {
+                actionTaken = true;
+                var minutes = _config.Current.Popup.DismissMinutes;
+                lock (_lock)
+                {
+                    _snoozeUntil = DateTimeOffset.UtcNow.AddMinutes(minutes);
+                }
+                Log.Info($"Popup dismissed via X — quiet for {minutes} min");
             });
 
         _popup.Show(model, actions, onClosed: () =>
@@ -164,6 +188,57 @@ public sealed class PopupController : BackgroundService
             }
             Log.Info($"Popup dismissed without action — re-nag in {_config.Current.Popup.RenagMinutesDefault} min");
         });
+    }
+
+    /// <summary>
+    /// The rotating line shown above the measured facts. Never throws and never returns
+    /// empty: it is now the popup's headline, so a failure here degrades to a plain sentence
+    /// rather than leaving the window without a subject.
+    /// </summary>
+    private string BuildMessage(EngineSnapshot snap, string key)
+    {
+        try
+        {
+            var now = DateTimeOffset.Now;
+            var today = now.ToString("yyyy-MM-dd");
+            int times, seconds;
+            lock (_lock)
+            {
+                if (_tallyDate != today)
+                {
+                    _todayTally.Clear();
+                    _tallyDate = today;
+                }
+                var prev = _todayTally.GetValueOrDefault(key);
+                (times, seconds) = (prev.Times + 1, prev.Seconds + _unproductiveStreak);
+                _todayTally[key] = (times, seconds);
+            }
+
+            // the first unfinished priority of the day, if the user set any
+            string? priority = null;
+            try
+            {
+                priority = _days.Today().Priorities.FirstOrDefault(p => !p.Done && p.Text.Length > 0)?.Text;
+            }
+            catch (Exception ex)
+            {
+                Log.Warn("Popup message: day state unreadable — " + ex.Message);
+            }
+
+            return _messages.Pick(new PopupMessageContext(
+                Minutes: _unproductiveStreak / 60,
+                Site: PopupMessagePicker.SiteNameOf(snap.MatchedRule, snap.App),
+                Now: now,
+                TimesToday: times,
+                TotalTodaySeconds: seconds,
+                TopPriority: priority));
+        }
+        catch (Exception ex)
+        {
+            Log.Warn("Popup message pick failed — " + ex.Message);
+            var mins = _unproductiveStreak / 60;
+            return mins >= 1 ? $"{mins} minute pe o activitate neproductivă." : "Activitate neproductivă.";
+        }
     }
 
     /// <summary>Runs after the countdown expired: re-verifies the target is STILL the same

@@ -20,7 +20,12 @@ distrageri. Datele nu părăsesc NICIODATĂ calculatorul tău — vezi [PRIVACY.
 - **Clasificare productiv / neutru / neproductiv** cu reguli editabile din dashboard +
   excepții pentru YouTube educațional (cuvinte în titlu / canale whitelistate).
 - **Popup anti-distragere** — apare când stai prea mult pe ceva neproductiv: amâni,
-  marchezi ca productiv (devine regulă) sau confirmi că știi ce faci.
+  confirmi că știi ce faci sau îl închizi. Mesajul se rotește și e scris cu umor cald,
+  nu ca o mustrare.
+- **Timp de pe telefon** — Screen Time-ul de pe iPhone, importat manual: faci capturi,
+  le dai LLM-ului tău (orice cont, inclusiv gratuit), lipești JSON-ul în pagina „Telefon".
+  Aplicația nu vorbește cu niciun LLM și nu are nevoie de chei API. Aplicațiile se
+  clasifică o singură dată și apar în raport lângă timpul de pe PC, într-un bloc separat.
 - **Dashboard local** ([http://localhost:5601](http://localhost:5601)) — zi/săptămână/lună,
   timeline, heatmap pe ore, defalcări pe clase/proiecte/aplicații/domenii, jurnal zilnic,
   focus score, streak-uri, realocare de timp pe minute între proiecte.

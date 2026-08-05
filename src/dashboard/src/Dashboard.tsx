@@ -15,6 +15,10 @@ const CLASS_VAR: Record<ClassName, string> = {
   unproductive: "var(--cls-unproductive)",
 };
 
+function fmtMin(minutes: number): string {
+  return fmt(minutes * 60);
+}
+
 function fmt(s: number): string {
   if (s >= 3600) return `${Math.floor(s / 3600)}h ${Math.round((s % 3600) / 60)}m`;
   if (s >= 60) return `${Math.round(s / 60)}m`;
@@ -537,6 +541,92 @@ export default function Dashboard() {
           <span>mult</span>
         </div>
       </section>
+
+      {report?.phone && report.phone.totalMinutes > 0 ? (
+        <section className="card">
+          <h2>Timp pe telefon</h2>
+          <p className="hint">
+            Din Screen Time, importat manual — totaluri raportate de Apple pe perioade, nu timp
+            cronometrat. De aceea stă separat și NU se adună la orele de mai sus.
+          </p>
+
+          <div className="phone-preview" style={{ marginTop: 10 }}>
+            <span>
+              total <b>{fmtMin(report.phone.totalMinutes)}</b>
+            </span>
+            {report.phone.periods.map((p) => (
+              <span key={`${p.device}-${p.from}`} className="range-label">
+                {p.from} → {p.to}: {fmtMin(p.totalMinutes)} ({fmtMin(p.avgDailyMinutes)}/zi)
+              </span>
+            ))}
+          </div>
+
+          <div className="phone-list" style={{ marginTop: 14 }}>
+            {(["productive", "neutral", "unproductive"] as ClassName[]).map((cls) => {
+              const v = report.phone!.byClass?.[cls] ?? 0;
+              if (v <= 0) return null;
+              return (
+                <div className="phone-list-row" key={cls}>
+                  <span>
+                    <i
+                      className="swatch-inline"
+                      style={{ background: `var(${CLASS_VAR[cls]})` }}
+                      aria-hidden="true"
+                    />
+                    {CLASS_LABEL[cls]}
+                  </span>
+                  <span className="val">{fmtMin(v)}</span>
+                </div>
+              );
+            })}
+            {report.phone.unclassifiedMinutes > 0 ? (
+              <div className="phone-list-row">
+                <span className="range-label">
+                  neclasificat
+                  <span className="meta">clasifică-le în pagina Telefon</span>
+                </span>
+                <span className="val">{fmtMin(report.phone.unclassifiedMinutes)}</span>
+              </div>
+            ) : null}
+          </div>
+
+          {Object.keys(report.phone.byProject).length > 0 ? (
+            <>
+              <div className="reclass-title" style={{ marginTop: 16 }}>Pe proiecte</div>
+              <div className="phone-list">
+                {Object.entries(report.phone.byProject).map(([name, minutes]) => (
+                  <div className="phone-list-row" key={name}>
+                    <span>{name}</span>
+                    <span className="val">{fmtMin(minutes)}</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : null}
+
+          {report.phone.apps.length > 0 ? (
+            <>
+              <div className="reclass-title" style={{ marginTop: 16 }}>Aplicații</div>
+              <div className="phone-list">
+                {report.phone.apps.slice(0, 8).map((a) => (
+                  <div className="phone-list-row" key={a.name}>
+                    <span>{a.name}</span>
+                    <span className="val">{fmtMin(a.minutes)}</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : null}
+
+          {report.phone.appsSumMinutes > report.phone.totalMinutes ? (
+            <p className="hint" style={{ marginTop: 10 }}>
+              Suma aplicațiilor ({fmtMin(report.phone.appsSumMinutes)}) depășește totalul raportat
+              de Apple ({fmtMin(report.phone.totalMinutes)}): site-urile se numără și separat, și
+              în browser. Totalul e cifra de încredere; aplicațiile arată proporțiile.
+            </p>
+          ) : null}
+        </section>
+      ) : null}
 
       <section className="card">
         <h2>Timeline</h2>

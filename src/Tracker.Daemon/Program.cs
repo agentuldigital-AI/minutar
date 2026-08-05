@@ -75,12 +75,12 @@ Tracker.Shared.Storage.IEventStore store = teeForward is not null
 var pause = new Tracker.Daemon.Pause.PauseService();
 var engine = new RulesEngineService(config, windowStore, browserStore, store, pause, host);
 var popupService = new PopupService();
+var days = new DayStateStore();
 var focus = new Tracker.Daemon.Focus.FocusService(config);
-var popupController = new PopupController(config, engine, popupService, focus, windowStore);
+var popupController = new PopupController(config, engine, popupService, focus, windowStore, days);
 var claude = new ClaudeModule(config, windowStore, store, host);
 
 var report = new ReportService(store, config, host);
-var days = new DayStateStore();
 var coach = new CoachEngine(config, engine, popupService, days, cfg.Server.BridgePort, store);
 
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
@@ -152,6 +152,186 @@ app.MapGet("/api/journal", async (string? date, CancellationToken ct) =>
 {
     var d = date is not null ? DateTimeOffset.Parse(date) : DateTimeOffset.Now;
     return Results.Json(await report.BuildJournalAsync(d, ct));
+});
+
+// ---- phone screen time (entered from outside) --------------------------------
+// iOS has no export: Screen Time data cannot leave the device by any supported route
+// (the report extension's sandbox blocks every output channel), so the numbers are read
+// off screenshots and posted here. WEEKLY summaries — a week is a single zero-duration
+// event, never spread across days, because we know the total but not when it happened.
+// Zero duration also guarantees it can never be mistaken for measured PC time.
+
+app.MapPost("/api/phone/usage", async (PhoneUsageDto req, CancellationToken ct) =>
+{
+    if (!DateOnly.TryParse(req.From, out var from) || !DateOnly.TryParse(req.To, out var to))
+        return Results.BadRequest(new { error = "from/to trebuie să fie date valide (yyyy-MM-dd)" });
+    if (to <= from)
+        return Results.BadRequest(new { error = "to trebuie să fie după from" });
+    var span = to.DayNumber - from.DayNumber;
+    if (span > 31)
+        return Results.BadRequest(new { error = "intervalul e prea lung (max 31 de zile)" });
+    // a day has 1440 minutes; anything above the span's worth of minutes is a typo, not data
+    if (req.TotalMinutes <= 0 || req.TotalMinutes > span * 1440)
+        return Results.BadRequest(new { error = $"totalMinutes trebuie să fie între 1 și {span * 1440}" });
+
+    var apps = (req.Apps ?? new List<PhoneAppUsageDto>())
+        .Where(a => !string.IsNullOrWhiteSpace(a.Name) && a.Minutes > 0)
+        .Select(a => new { name = a.Name.Trim(), minutes = a.Minutes })
+        .OrderByDescending(a => a.minutes)
+        .ToList();
+
+    var data = new Dictionary<string, object?>
+    {
+        ["device"] = string.IsNullOrWhiteSpace(req.Device) ? "phone" : req.Device.Trim(),
+        ["from"] = from.ToString("yyyy-MM-dd"),
+        ["to"] = to.ToString("yyyy-MM-dd"),
+        ["totalMinutes"] = req.TotalMinutes,
+        ["avgDailyMinutes"] = (int)Math.Round((double)req.TotalMinutes / span),
+        ["apps"] = apps,
+        ["pickups"] = req.Pickups,
+        ["notifications"] = req.Notifications,
+        ["source"] = string.IsNullOrWhiteSpace(req.Source) ? "screen-time-screenshot" : req.Source.Trim(),
+        // a re-send of the same week is kept, not merged: the newest write wins on read,
+        // so a correction never has to delete anything
+        ["recordedAt"] = DateTimeOffset.Now.ToString("o"),
+    };
+
+    try
+    {
+        await store.EnsureBucketAsync(AwBuckets.PhoneUsage(host), AwBuckets.PhoneUsageType, ct);
+        await store.HeartbeatAsync(
+            AwBuckets.PhoneUsage(host), data,
+            pulsetimeSeconds: 0, // never merge — each submission is its own record
+            timestamp: new DateTimeOffset(from.ToDateTime(TimeOnly.MinValue), DateTimeOffset.Now.Offset),
+            durationSeconds: 0, ct: ct);
+    }
+    catch (Exception ex)
+    {
+        Log.Error("phone usage save failed: " + ex.Message);
+        return Results.Problem("nu am putut salva: " + ex.Message);
+    }
+
+    Log.Info($"Phone usage saved: {from}..{to} {req.TotalMinutes}m, {apps.Count} aplicații");
+    return Results.Ok(new { saved = true, from = data["from"], to = data["to"], minutes = req.TotalMinutes });
+});
+
+static string? PhoneStr(JsonElement data, string prop) =>
+    data.ValueKind == JsonValueKind.Object && data.TryGetProperty(prop, out var v)
+    && v.ValueKind == JsonValueKind.String
+        ? v.GetString()
+        : null;
+
+app.MapGet("/api/phone/usage", async (string? from, string? to, CancellationToken ct) =>
+{
+    var f = from is not null ? DateTimeOffset.Parse(from) : DateTimeOffset.Now.AddDays(-120);
+    var t = to is not null ? DateTimeOffset.Parse(to) : DateTimeOffset.Now.AddDays(1);
+    var events = await store.GetEventsRangeAsync(AwBuckets.PhoneUsage(host), f, t, ct: ct);
+
+    // one entry per (device, week): corrections are appended, so the latest write wins
+    var latest = events
+        .Select(e => new
+        {
+            Device = PhoneStr(e.Data, "device") ?? "phone",
+            From = PhoneStr(e.Data, "from") ?? "",
+            RecordedAt = PhoneStr(e.Data, "recordedAt") ?? "",
+            Event = e,
+        })
+        .GroupBy(x => (x.Device, x.From))
+        .Select(g => g.OrderByDescending(x => x.RecordedAt, StringComparer.Ordinal).First().Event)
+        .OrderBy(e => e.Timestamp)
+        .Select(e => e.Data)
+        .ToList();
+
+    return Results.Json(new { weeks = latest });
+});
+
+// Aplicațiile văzute în importuri care nu au încă o clasă. Se recalculează la FIECARE
+// cerere, nu doar la primul import: o aplicație nouă apărută în a cincea săptămână
+// trebuie clasificată la fel ca cele din prima.
+app.MapGet("/api/phone/unclassified", async (CancellationToken ct) =>
+{
+    var events = await store.GetEventsRangeAsync(
+        AwBuckets.PhoneUsage(host), DateTimeOffset.Now.AddYears(-2), DateTimeOffset.Now.AddDays(1), ct: ct);
+
+    var known = config.Current.PhoneApps
+        .Select(p => p.Name.Trim())
+        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    // minutele se cumulează peste toate importurile: cele mai folosite apar primele,
+    // ca utilizatorul să înceapă cu ce contează
+    var totals = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+    foreach (var e in events)
+    {
+        if (e.Data.ValueKind != JsonValueKind.Object) continue;
+        if (!e.Data.TryGetProperty("apps", out var apps) || apps.ValueKind != JsonValueKind.Array) continue;
+        foreach (var a in apps.EnumerateArray())
+        {
+            var name = PhoneStr(a, "name");
+            if (string.IsNullOrWhiteSpace(name) || known.Contains(name)) continue;
+            var min = a.TryGetProperty("minutes", out var m) && m.ValueKind == JsonValueKind.Number ? m.GetInt32() : 0;
+            totals[name] = totals.GetValueOrDefault(name) + min;
+        }
+    }
+
+    return Results.Json(new
+    {
+        apps = totals.OrderByDescending(kv => kv.Value).Select(kv => new { name = kv.Key, minutes = kv.Value }),
+        projects = config.Current.Projects.Select(p => p.Name).Where(n => n.Length > 0),
+    });
+});
+
+app.MapPost("/api/phone/classify", (PhoneClassifyDto req) =>
+{
+    var items = (req.Apps ?? new List<PhoneAppRuleDto>())
+        .Where(a => !string.IsNullOrWhiteSpace(a.Name))
+        .ToList();
+    if (items.Count == 0) return Results.BadRequest(new { error = "nicio aplicație de salvat" });
+    foreach (var a in items)
+    {
+        if (a.Class is not ("productive" or "neutral" or "unproductive"))
+            return Results.BadRequest(new { error = $"clasă invalidă pentru „{a.Name}”: {a.Class}" });
+    }
+
+    // ADITIV, ca /api/projects: nu cere token de versiune și nu poate șterge munca altcuiva
+    // — încarcă proaspăt de pe disc, adaugă/înlocuiește doar aplicațiile trimise, scrie.
+    lock (ConfigWriter.SyncRoot)
+    {
+        TrackerConfig fresh;
+        try
+        {
+            fresh = TrackerConfig.Load(config.ConfigPath);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("phone classify: config load failed — " + ex.Message);
+            return Results.Problem("nu am putut citi configul: " + ex.Message);
+        }
+
+        foreach (var a in items)
+        {
+            var name = a.Name.Trim();
+            fresh.PhoneApps.RemoveAll(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+            fresh.PhoneApps.Add(new PhoneAppConfig
+            {
+                Name = name,
+                Class = a.Class,
+                Project = a.Project?.Trim() ?? "",
+            });
+        }
+
+        try
+        {
+            ConfigWriter.Write(fresh, config.ConfigPath);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("phone classify: config write failed — " + ex.Message);
+            return Results.Problem("nu am putut salva: " + ex.Message);
+        }
+    }
+
+    Log.Info($"Phone apps classified: {string.Join(", ", items.Select(a => $"{a.Name}={a.Class}"))}");
+    return Results.Ok(new { saved = items.Count });
 });
 
 // ---- settings API (dashboard "Setări" page) ---------------------------------
@@ -575,8 +755,14 @@ app.MapPost("/popup/test", () =>
 {
     var c = config.Current;
     popupService.Show(
-        new PopupModel("Popup de test (M3) — se închide singur în 8s", "verificare pipeline WPF",
-            c.Popup.PostponeOptionsMinutes, c.Popup.SureCooldownMinutes),
+        new PopupModel(
+            // a real rotating line, so /popup/test shows what the user will actually get
+            Message: new PopupMessagePicker().Pick(new PopupMessageContext(
+                Minutes: 12, Site: "YouTube", Now: DateTimeOffset.Now,
+                TimesToday: 2, TotalTodaySeconds: 1800, TopPriority: null)),
+            ContextText: "YouTube · 12 min",
+            PostponeOptionsMinutes: c.Popup.PostponeOptionsMinutes,
+            SureCooldownMinutes: c.Popup.SureCooldownMinutes),
         new PopupActions(_ => { }, () => { }));
     _ = Task.Delay(8000).ContinueWith(_ => popupService.Hide());
     return Results.Ok(new { shown = true });
@@ -732,6 +918,13 @@ internal sealed record ConfigUpdate(
 internal sealed record DayAssignDto(
     string Date, string Match, string Value, string? Project = null, string? Class = null,
     string? From = null, string? To = null);
+internal sealed record PhoneAppRuleDto(string Name, string Class, string? Project = null);
+internal sealed record PhoneClassifyDto(List<PhoneAppRuleDto>? Apps);
+internal sealed record PhoneAppUsageDto(string Name, int Minutes);
+internal sealed record PhoneUsageDto(
+    string From, string To, int TotalMinutes,
+    string? Device = null, List<PhoneAppUsageDto>? Apps = null,
+    int? Pickups = null, int? Notifications = null, string? Source = null);
 internal sealed record MinutesAssignDto(
     string Date, string Match, string Value, int Minutes, string? Project = null, string? Class = null,
     string? RequestId = null);

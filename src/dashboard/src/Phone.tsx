@@ -142,6 +142,7 @@ export default function Phone() {
   const [pending, setPending] = useState<UnclassifiedPhone>({ apps: [], projects: [] });
   const [choices, setChoices] = useState<Record<string, { class: string; project: string }>>({});
   const [savingRules, setSavingRules] = useState(false);
+  const [showAllApps, setShowAllApps] = useState(false);
 
   const load = () =>
     Promise.all([fetchPhoneWeeks(), fetchUnclassifiedPhoneApps()])
@@ -198,6 +199,7 @@ export default function Phone() {
     try {
       await savePhoneWeek({ ...parsed, source: "screen-time-llm" });
       setRaw("");
+      setShowAllApps(false);
       setStatus("saved");
       await load();
       setTimeout(() => setStatus(""), 2500);
@@ -285,14 +287,18 @@ export default function Phone() {
 
             {parsed.apps?.length ? (
               <div className="phone-list" style={{ marginTop: 12 }}>
-                {parsed.apps.slice(0, 12).map((a) => (
+                {(showAllApps ? parsed.apps : parsed.apps.slice(0, 12)).map((a) => (
                   <div className="phone-list-row" key={a.name}>
                     <span>{a.name}</span>
                     <span className="val">{hm(a.minutes)}</span>
                   </div>
                 ))}
                 {parsed.apps.length > 12 ? (
-                  <p className="hint">…și încă {parsed.apps.length - 12} aplicații</p>
+                  <button className="link-btn" onClick={() => setShowAllApps(!showAllApps)}>
+                    {showAllApps
+                      ? "arată mai puțin"
+                      : `…și încă ${parsed.apps.length - 12} aplicații — arată-le`}
+                  </button>
                 ) : null}
               </div>
             ) : (
@@ -305,7 +311,7 @@ export default function Phone() {
               <button className="btn primary" onClick={importParsed} disabled={status === "saving"}>
                 {status === "saving" ? "Se importă…" : "Importă"}
               </button>
-              <button className="btn" onClick={() => setRaw("")}>Renunță</button>
+              <button className="btn" onClick={() => { setRaw(""); setShowAllApps(false); }}>Renunță</button>
             </div>
           </>
         ) : null}
@@ -349,7 +355,7 @@ export default function Phone() {
             dată; la importurile următoare apar doar aplicațiile pe care nu le-am mai văzut.
           </p>
 
-          <div className="phone-list" style={{ marginTop: 12 }}>
+          <div className="phone-classify-list" style={{ marginTop: 12 }}>
             {pending.apps.map((a) => (
               <div className="phone-classify-row" key={a.name}>
                 <span className="nm">

@@ -500,7 +500,10 @@ footer { margin-top: 30px; font-size: 12px; color: var(--text-secondary); displa
 .phone-preview { display: flex; gap: 18px; flex-wrap: wrap; margin: 6px 0 0; font-size: 13.5px; }
 .phone-preview b { font-variant-numeric: tabular-nums; }
 
-.phone-list { display: flex; flex-direction: column; gap: 2px; }
+/* Cardul e lat cat pagina, dar un rand „nume ......... valoare" intins pe 1400px nu se
+   mai poate urmari cu ochiul. De aceea listele au o latime proprie: perechea ramane
+   compacta, iar restul cardului ramane gol. */
+.phone-list { display: flex; flex-direction: column; gap: 2px; max-width: 620px; }
 .phone-list-row {
   display: flex; justify-content: space-between; align-items: baseline; gap: 16px;
   padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 13.5px;
@@ -545,8 +548,14 @@ footer { margin-top: 30px; font-size: 12px; color: var(--text-secondary); displa
 .phone-field input[type="number"] { width: 84px; }
 
 /* rând de clasificare: nume + minute, alegerea clasei, proiect opțional */
+/* Lista de clasificare are latimea ei: nu incape in cei 620px ai .phone-list (butonul
+   „Neproductiv" iese tocmai la limita), dar nici nu trebuie sa se intinda cat cardul. */
+.phone-classify-list { display: flex; flex-direction: column; max-width: 760px; }
+/* Ultima coloana e un spatiu gol care absoarbe latimea ecranului: fara ea, numele
+   ramanea lipit de marginea stanga si butoanele fugeau la dreapta, cu 800px de nimic
+   intre ele — imposibil de urmarit pe ce rand esti. */
 .phone-classify-row {
-  display: grid; grid-template-columns: 1fr auto auto; gap: 12px;
+  display: grid; grid-template-columns: minmax(140px, max-content) auto auto 1fr; gap: 14px;
   align-items: center; padding: 9px 0; border-bottom: 1px solid var(--border);
 }
 .phone-classify-row:last-of-type { border-bottom: none; }
@@ -572,3 +581,11 @@ footer { margin-top: 30px; font-size: 12px; color: var(--text-secondary); displa
   display: inline-block; width: 9px; height: 9px; border-radius: 3px;
   margin-right: 8px; vertical-align: middle;
 }
+
+/* „…si inca N aplicatii" e o actiune, nu o nota: arata ca un link, se comporta ca buton */
+.link-btn {
+  align-self: flex-start; margin-top: 8px; padding: 2px 0;
+  background: none; border: none; cursor: pointer;
+  color: var(--accent); font-size: 12px; font-family: inherit;
+}
+.link-btn:hover { text-decoration: underline; }

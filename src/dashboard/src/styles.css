@@ -509,6 +509,21 @@ footer { margin-top: 30px; font-size: 12px; color: var(--text-secondary); displa
 .phone-list-row .val { color: var(--text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .phone-list-row .meta { color: var(--text-secondary); font-size: 12.5px; margin-left: 8px; }
 
+/* ---- total pe dispozitive (PC + telefon) ---- */
+.dev-total { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-top: 10px; }
+.dev-total b { font-size: 22px; font-variant-numeric: tabular-nums; }
+.dev-col { background: var(--card-2); border-radius: 10px; padding: 12px 14px; }
+.dev-col h3 { margin: 0 0 8px; font-size: 13px; }
+/* badge-ul de dispozitiv are lățime fixă: altfel „pc+tel" ar împinge numele față de
+   rândurile cu un singur dispozitiv, iar coloana nu s-ar mai citi pe verticală.
+   Text, nu emoji: pictogramele de dispozitiv lipsesc din fonturile de sistem și ies
+   pătrățele goale. */
+.dev-badge {
+  display: inline-block; width: 48px; font-size: 10px; letter-spacing: 0.03em;
+  color: var(--text-secondary); text-transform: uppercase; font-weight: 700;
+}
+.barlist .name .dot { margin-right: 7px; }
+
 /* formularul manual: fiecare câmp cu eticheta DEASUPRA, nu lipită de input */
 .phone-form { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; margin-top: 10px; }
 .phone-field { display: flex; flex-direction: column; gap: 5px; }

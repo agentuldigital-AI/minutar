@@ -240,6 +240,66 @@ export default function Dashboard() {
     ? `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, "0")}-${String(from.getDate()).padStart(2, "0")}`
     : undefined;
 
+  /**
+   * PC + telefon la un loc. Screen Time vine pe perioade întregi (o săptămână), nu pe
+   * ore, așa că pe „Zi" nu se poate defalca fără să inventăm precizie — de aceea blocul
+   * apare doar pe săptămână și lună.
+   */
+  const combined = useMemo(() => {
+    const ph = report?.phone;
+    if (!report || !ph || ph.totalMinutes <= 0 || mode === "day") return null;
+
+    // Apple raportează un total MAI MIC decât suma aplicațiilor (un site se numără și
+    // singur, și în browserul care l-a deschis). Punem proporțiile aplicațiilor pe
+    // totalul lui: așa părțile adună exact totalul, în loc să-l depășească.
+    const scale = ph.appsSumMinutes > 0 ? ph.totalMinutes / ph.appsSumMinutes : 0;
+    const sec = (minutes: number) => Math.round(minutes * 60 * scale);
+
+    const pcByClass = report.totals.byClass ?? {};
+    const classes = (["productive", "neutral", "unproductive"] as ClassName[]).map((cls) => ({
+      cls,
+      pc: pcByClass[cls] ?? 0,
+      phone: sec(ph.byClass?.[cls] ?? 0),
+    }));
+
+    // în listele Screen Time, site-urile stau lângă aplicații („mediafax.ro" lângă
+    // „WhatsApp"); le separăm ca să nu amestecăm două leaderboard-uri diferite
+    const isSite = (name: string) => name.includes(".") && !name.includes(" ");
+    const merge = (pc: NamedSeconds[], phone: { name: string; minutes: number }[]) => {
+      const key = (n: string) => n.toLowerCase().replace(/\.exe$/, "").trim();
+      const map = new Map<string, { name: string; seconds: number; pc: boolean; phone: boolean }>();
+      for (const i of pc) {
+        const k = key(i.name);
+        const e = map.get(k) ?? { name: i.name, seconds: 0, pc: false, phone: false };
+        e.seconds += i.seconds;
+        e.pc = true;
+        map.set(k, e);
+      }
+      for (const a of phone) {
+        const k = key(a.name);
+        const e = map.get(k) ?? { name: a.name, seconds: 0, pc: false, phone: false };
+        e.seconds += sec(a.minutes);
+        e.phone = true;
+        map.set(k, e);
+      }
+      return [...map.values()]
+        .filter((e) => e.seconds > 0)
+        .sort((a, b) => b.seconds - a.seconds)
+        .slice(0, 10);
+    };
+
+    const phoneSeconds = ph.totalMinutes * 60;
+    return {
+      pcSeconds: report.totals.activeSeconds,
+      phoneSeconds,
+      totalSeconds: report.totals.activeSeconds + phoneSeconds,
+      classes,
+      unclassified: sec(ph.unclassifiedMinutes),
+      apps: merge(report.byApp ?? [], ph.apps.filter((a) => !isSite(a.name))),
+      sites: merge(report.byDomain ?? [], ph.apps.filter((a) => isSite(a.name))),
+    };
+  }, [report, mode]);
+
   // săptămână/lună: agregare pe zi din segmentele (deja filtrate pe clasă/proiect)
   const dayBars = useMemo(() => {
     if (mode === "day") return [];
@@ -542,7 +602,82 @@ export default function Dashboard() {
         </div>
       </section>
 
-      {report?.phone && report.phone.totalMinutes > 0 ? (
+      {combined ? (
+        <section className="card">
+          <h2>Total pe dispozitive</h2>
+          <p className="hint">
+            PC + telefon la un loc. Bara plină = PC, partea transparentă = telefon.
+            Screen Time vine pe săptămâni întregi, de aceea blocul apare doar pe
+            săptămână și lună.
+          </p>
+
+          <div className="dev-total">
+            <b>{fmt(combined.totalSeconds)}</b>
+            <span className="range-label">
+              PC {fmt(combined.pcSeconds)} · telefon {fmt(combined.phoneSeconds)}
+            </span>
+          </div>
+
+          <div className="barlist" style={{ marginTop: 12 }}>
+            {combined.classes.map((r) => {
+              const tot = r.pc + r.phone;
+              const pct = combined.totalSeconds > 0 ? (tot / combined.totalSeconds) * 100 : 0;
+              const pcW = combined.totalSeconds > 0 ? (r.pc / combined.totalSeconds) * 100 : 0;
+              return (
+                <div className="row" key={r.cls}>
+                  <span className="name">
+                    <span className="dot" style={{ background: CLASS_VAR[r.cls] }} />
+                    {CLASS_LABEL[r.cls]}
+                  </span>
+                  <span className="track">
+                    <span
+                      className="bar"
+                      style={{
+                        left: 0, width: `${pcW}%`, background: CLASS_VAR[r.cls],
+                        borderRadius: r.phone > 0 ? "5px 0 0 5px" : undefined,
+                      }}
+                    />
+                    <span
+                      className="bar"
+                      style={{
+                        left: `${pcW}%`,
+                        width: `${combined.totalSeconds > 0 ? (r.phone / combined.totalSeconds) * 100 : 0}%`,
+                        background: CLASS_VAR[r.cls], opacity: 0.42,
+                      }}
+                    />
+                  </span>
+                  <span className="val" title={`PC ${fmt(r.pc)} · telefon ${fmt(r.phone)}`}>
+                    {fmt(tot)} · {Math.round(pct)}%
+                  </span>
+                </div>
+              );
+            })}
+            {combined.unclassified > 0 ? (
+              <div className="row">
+                <span className="name range-label">neclasificat (telefon)</span>
+                <span className="track">
+                  <span
+                    className="bar"
+                    style={{
+                      left: 0,
+                      width: `${combined.totalSeconds > 0 ? (combined.unclassified / combined.totalSeconds) * 100 : 0}%`,
+                      background: "var(--track-strong, var(--text-secondary))", opacity: 0.35,
+                    }}
+                  />
+                </span>
+                <span className="val">{fmt(combined.unclassified)}</span>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="columns" style={{ marginTop: 18 }}>
+            <DeviceList title="Top aplicații" items={combined.apps} />
+            <DeviceList title="Top site-uri" items={combined.sites} />
+          </div>
+        </section>
+      ) : null}
+
+      {report?.phone && report.phone.totalMinutes > 0 && mode !== "day" ? (
         <section className="card">
           <h2>Timp pe telefon</h2>
           <p className="hint">
@@ -570,7 +705,7 @@ export default function Dashboard() {
                   <span>
                     <i
                       className="swatch-inline"
-                      style={{ background: `var(${CLASS_VAR[cls]})` }}
+                      style={{ background: CLASS_VAR[cls] }}
                       aria-hidden="true"
                     />
                     {CLASS_LABEL[cls]}
@@ -1624,6 +1759,43 @@ function ReclassList({
               suma alocărilor nu poate depăși totalul. Restul rămâne pe standard.
             </div>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Clasament peste ambele dispozitive. Badge-ul spune de unde vine timpul: fără el,
+ * „WhatsApp 5h" ar putea fi de pe PC, de pe telefon sau amândouă, iar diferența
+ * schimbă ce faci cu informația.
+ */
+function DeviceList({ title, items }: {
+  items: { name: string; seconds: number; pc: boolean; phone: boolean }[];
+  title: string;
+}) {
+  const max = Math.max(1, ...items.map((i) => i.seconds));
+  return (
+    <div className="dev-col">
+      <h3>{title}</h3>
+      {items.length === 0 ? (
+        <div className="empty">Fără date în interval.</div>
+      ) : (
+        <div className="barlist">
+          {items.map((i) => (
+            <div className="row" key={i.name}>
+              <span className="name" title={i.name}>
+                <span className="dev-badge" title={i.pc && i.phone ? "PC și telefon" : i.phone ? "telefon" : "PC"}>
+                  {i.pc && i.phone ? "pc+tel" : i.phone ? "tel" : "pc"}
+                </span>
+                {i.name}
+              </span>
+              <span className="track">
+                <span className="bar" style={{ width: `${(i.seconds / max) * 100}%`, background: "var(--bar-window)" }} />
+              </span>
+              <span className="val">{fmt(i.seconds)}</span>
+            </div>
+          ))}
         </div>
       )}
     </div>

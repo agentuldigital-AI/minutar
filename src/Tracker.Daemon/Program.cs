@@ -253,8 +253,10 @@ app.MapGet("/api/phone/unclassified", async (CancellationToken ct) =>
     var events = await store.GetEventsRangeAsync(
         AwBuckets.PhoneUsage(host), DateTimeOffset.Now.AddYears(-2), DateTimeOffset.Now.AddDays(1), ct: ct);
 
+    // aceeași cheie ca la raportare: „9GAG" acoperă și „9GAG: Best LOL Pics & GIFs",
+    // altfel aceeași aplicație ar fi cerută la clasificare la fiecare import
     var known = config.Current.PhoneApps
-        .Select(p => p.Name.Trim())
+        .Select(p => PhoneUsage.MatchKey(p.Name))
         .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
     // minutele se cumulează peste toate importurile: cele mai folosite apar primele,
@@ -267,7 +269,7 @@ app.MapGet("/api/phone/unclassified", async (CancellationToken ct) =>
         foreach (var a in apps.EnumerateArray())
         {
             var name = PhoneStr(a, "name");
-            if (string.IsNullOrWhiteSpace(name) || known.Contains(name)) continue;
+            if (string.IsNullOrWhiteSpace(name) || known.Contains(PhoneUsage.MatchKey(name))) continue;
             var min = a.TryGetProperty("minutes", out var m) && m.ValueKind == JsonValueKind.Number ? m.GetInt32() : 0;
             totals[name] = totals.GetValueOrDefault(name) + min;
         }
@@ -322,6 +324,7 @@ app.MapPost("/api/phone/classify", (PhoneClassifyDto req) =>
         try
         {
             ConfigWriter.Write(fresh, config.ConfigPath);
+            config.ReloadNow();
         }
         catch (Exception ex)
         {
@@ -426,6 +429,7 @@ app.MapPut("/api/config", (ConfigUpdate update) =>
         if (update.BrowserProcesses is not null) updated.Browser.Processes = Clean(update.BrowserProcesses);
         updated.Validate();
         ConfigWriter.Write(updated, config.ConfigPath);
+        config.ReloadNow();
         Log.Info("Config saved from the dashboard settings page");
         }
         return Results.Ok(new { saved = true });
@@ -469,6 +473,7 @@ app.MapPost("/api/projects", (NewProjectDto req) =>
             });
             updated.Validate();
             ConfigWriter.Write(updated, config.ConfigPath);
+            config.ReloadNow();
             Log.Info($"Project adopted from the dashboard: {name}");
         }
         return Results.Ok(new { created = true, name });
@@ -522,6 +527,7 @@ app.MapPost("/api/assign-day", (DayAssignDto req) =>
         if (cls.Length > 0) entry.Class = cls;
         updated.Validate(); // prinde și HH:mm invalid, from>=to, intervale suprapuse
         ConfigWriter.Write(updated, config.ConfigPath);
+        config.ReloadNow();
         var span = from.Length > 0 ? $" {from}-{to}" : "";
         Log.Info($"Day assignment: {req.Date}{span} {req.Match}:{req.Value} -> project='{entry.Project}' class='{entry.Class}'");
         }
@@ -556,6 +562,8 @@ app.MapDelete("/api/assign-day", (string date, string match, string value, strin
             updated.Assignments.Remove(entry);
 
         ConfigWriter.Write(updated, config.ConfigPath);
+
+        config.ReloadNow();
         var span = f.Length > 0 ? $" {f}-{t}" : "";
         Log.Info($"Day assignment removed: {date}{span} {match}:{value} (part={part ?? "all"})");
         }
@@ -688,6 +696,7 @@ app.MapPost("/api/assign-minutes", async (MinutesAssignDto req, CancellationToke
         }
         updated.Validate();
         ConfigWriter.Write(updated, config.ConfigPath);
+        config.ReloadNow();
         windowCount = merged.Count;
         }
         if (!string.IsNullOrEmpty(req.RequestId))

@@ -33,6 +33,14 @@ public sealed class ConfigProvider : IDisposable
     public string ConfigPath { get; }
     public TrackerConfig Current => _current;
 
+    /// <summary>
+    /// Reîncarcă ACUM, sincron. Se cheamă după fiecare scriere venită din dashboard: altfel
+    /// răspunsul la POST pleacă înaintea watcher-ului (500 ms debounce), iar următorul GET
+    /// citește configul vechi. Simptomul raportat de utilizator: salvezi clasificările și
+    /// nu se întâmplă nimic; abia al doilea click „prinde".
+    /// </summary>
+    public void ReloadNow() => Reload();
+
     private void Reload()
     {
         try

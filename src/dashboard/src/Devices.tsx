@@ -175,7 +175,7 @@ export default function Devices() {
               </p>
             )}
 
-            <div className="barlist" style={{ marginTop: 12 }}>
+            <div className="barlist split-vals" style={{ marginTop: 12 }}>
               {(data?.classes ?? []).map((r) => {
                 const tot = r.pc + r.phone;
                 const denom = data?.totalSeconds ?? 0;
@@ -190,13 +190,15 @@ export default function Devices() {
                     <span className="track">
                       <span
                         className="bar"
+                        title={`Calculator — ${fmt(r.pc)}, adică ${tot > 0 ? Math.round((r.pc / tot) * 100) : 0}% din tot ce e ${CLASS_LABEL[r.cls].toLowerCase()}`}
                         style={{
                           left: 0, width: `${pcW}%`, background: CLASS_VAR[r.cls],
                           borderRadius: r.phone > 0 ? "5px 0 0 5px" : undefined,
                         }}
                       />
                       <span
-                        className="bar"
+                        className="bar seg-phone"
+                        title={`Telefon — ≈${fmt(r.phone)}, adică ${tot > 0 ? Math.round((r.phone / tot) * 100) : 0}% din tot ce e ${CLASS_LABEL[r.cls].toLowerCase()}`}
                         style={{
                           left: `${pcW}%`,
                           width: `${denom > 0 ? (r.phone / denom) * 100 : 0}%`,
@@ -204,15 +206,14 @@ export default function Devices() {
                         }}
                       />
                     </span>
-                    <span
-                      className="val"
-                      title={
-                        r.phone > 0
-                          ? `PC ${fmt(r.pc)} (măsurat) · telefon ≈${fmt(r.phone)} = ${r.phonePct}% din timpul de telefon`
-                          : `PC ${fmt(r.pc)} (măsurat)`
-                      }
-                    >
-                      {r.phone > 0 ? "≈" : ""}{fmt(tot)} · {Math.round(pct)}%
+                    <span className="val val-split">
+                      <b>{r.phone > 0 ? "≈" : ""}{fmt(tot)}</b>
+                      <span className="meta">{Math.round(pct)}% din total</span>
+                      {r.phone > 0 ? (
+                        <span className="meta">
+                          {Math.round((r.pc / tot) * 100)}% PC · {Math.round((r.phone / tot) * 100)}% telefon
+                        </span>
+                      ) : null}
                     </span>
                   </div>
                 );
@@ -239,6 +240,14 @@ export default function Devices() {
                 </div>
               ) : null}
             </div>
+
+            {data?.hasPhone ? (
+              <div className="legend" style={{ marginTop: 10 }}>
+                <span><i className="swatch-seg" /> calculator (cronometrat)</span>
+                <span><i className="swatch-seg faded" /> telefon (raportat de Apple)</span>
+                <span className="meta">treci cu mouse-ul peste o felie pentru detalii</span>
+              </div>
+            ) : null}
 
             <div className="columns" style={{ marginTop: 18 }}>
               <DeviceList title="Top aplicații" items={data?.apps ?? []} />

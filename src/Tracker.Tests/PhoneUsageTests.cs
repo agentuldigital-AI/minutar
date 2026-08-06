@@ -121,4 +121,52 @@ public sealed class PhoneUsageTests : IDisposable
         Assert.Single(await ReadWeekAsync(13));
         Assert.Single(await ReadWeekAsync(20));
     }
+
+    [Theory]
+    [InlineData("9GAG: Best LOL Pics & GIFs", "9GAG")]
+    [InlineData("9GAG", "9GAG")]
+    [InlineData("Yahoo Mail", "Yahoo Mail")]
+    [InlineData("mediafax.ro", "mediafax.ro")]
+    [InlineData("reportaproblem.apple.com", "reportaproblem.apple.com")]
+    [InlineData("Bolt - Request a ride", "Bolt")]
+    [InlineData("  Safari  ", "Safari")]
+    public void MatchKeyStripsTheMarketingSuffix(string raw, string expected)
+    {
+        Assert.Equal(expected, PhoneUsage.MatchKey(raw));
+    }
+
+    [Fact]
+    public async Task TheSameAppUnderTwoNamesIsClassifiedAndCountedOnce()
+    {
+        // Screen Time da cand numele scurt, cand pe cel comercial; cu potrivire exacta,
+        // aceeasi aplicatie iesea o data clasificata si o data nu, pe doua randuri
+        await _store.HeartbeatAsync(
+            AwBuckets.PhoneUsage("HOST"),
+            new Dictionary<string, object?>
+            {
+                ["device"] = "iPhone", ["from"] = "2026-07-13", ["to"] = "2026-07-20",
+                ["totalMinutes"] = 100, ["source"] = "test", ["recordedAt"] = "2026-08-06T10:00:00+03:00",
+                ["apps"] = new[]
+                {
+                    new Dictionary<string, object?> { ["name"] = "9GAG", ["minutes"] = 60 },
+                    new Dictionary<string, object?> { ["name"] = "9GAG: Best LOL Pics & GIFs", ["minutes"] = 40 },
+                },
+            },
+            pulsetimeSeconds: 0,
+            timestamp: new DateTimeOffset(2026, 7, 13, 0, 0, 0, TimeSpan.Zero));
+
+        var cfg = new Tracker.Shared.Config.TrackerConfig();
+        cfg.PhoneApps.Add(new Tracker.Shared.Config.PhoneAppConfig { Name = "9GAG", Class = "unproductive" });
+
+        var json = System.Text.Json.JsonSerializer.Serialize(
+            PhoneUsage.Summarize(await ReadWeekAsync(13), cfg));
+        using var doc = System.Text.Json.JsonDocument.Parse(json);
+
+        Assert.Equal(0, doc.RootElement.GetProperty("unclassifiedMinutes").GetInt32());
+        Assert.Equal(100, doc.RootElement.GetProperty("byClass").GetProperty("unproductive").GetInt32());
+        var apps = doc.RootElement.GetProperty("apps").EnumerateArray().ToList();
+        Assert.Single(apps);
+        Assert.Equal("9GAG", apps[0].GetProperty("name").GetString());
+        Assert.Equal(100, apps[0].GetProperty("minutes").GetInt32());
+    }
 }

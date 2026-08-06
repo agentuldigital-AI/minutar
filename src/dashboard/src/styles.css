@@ -623,3 +623,25 @@ footer { margin-top: 30px; font-size: 12px; color: var(--text-secondary); displa
 .shot-list { margin: 6px 0 0; padding-left: 18px; }
 .shot-list li { margin-bottom: 5px; }
 .shot-list li:last-child { margin-bottom: 0; }
+
+/* Feliile barei combinate au fiecare tooltip-ul ei, deci trebuie sa se simta „atinse". */
+.barlist .bar[title] { cursor: help; }
+.barlist .bar.seg-phone { border-radius: 0 5px 5px 0; }
+
+/* Valoarea din dreapta devine un mic bloc: totalul mare, sub el procentul din total si
+   impartirea PC/telefon — raspunde la „cat de productiv sunt PE calculator" dintr-o privire. */
+.barlist .val.val-split {
+  display: flex; flex-direction: column; align-items: flex-end; gap: 1px; line-height: 1.3;
+}
+.barlist .val.val-split b { color: var(--text-primary); }
+.barlist .val.val-split .meta { font-size: 11px; color: var(--text-secondary); font-weight: 500; }
+
+/* Legenda: patratel plin vs. acelasi patratel transparent, exact ca in bara. */
+.swatch-seg {
+  display: inline-block; width: 11px; height: 11px; border-radius: 3px;
+  background: var(--text-secondary);
+}
+.swatch-seg.faded { opacity: 0.42; }
+
+/* „31% PC · 69% telefon" nu incape in cei 78px ai coloanei standard de valoare. */
+.barlist.split-vals .row { grid-template-columns: minmax(130px, 185px) 1fr 138px; }

@@ -77,6 +77,26 @@ public static class PhoneUsage
     }
 
     /// <summary>
+    /// Cheia sub care se potrivește o aplicație cu regula ei. Screen Time afișează numele
+    /// comercial complet („9GAG: Best LOL Pics &amp; GIFs"), iar de la un import la altul
+    /// asistentul AI poate scrie când forma lungă, când cea scurtă — cu potrivire exactă,
+    /// aceeași aplicație ar apărea o dată clasificată și o dată nu. Tăiem tot ce vine după
+    /// „:" sau „ - ", ce rămâne e numele pe care îl recunoaște un om.
+    /// </summary>
+    public static string MatchKey(string name)
+    {
+        var n = name.Trim();
+        var cut = n.IndexOf(':');
+        if (cut > 0) n = n[..cut];
+        foreach (var sep in new[] { " - ", " – ", " — " })
+        {
+            var i = n.IndexOf(sep, StringComparison.Ordinal);
+            if (i > 0) n = n[..i];
+        }
+        return n.Trim();
+    }
+
+    /// <summary>
     /// Totalurile pe clase și proiecte, după regulile din <c>[[phone_apps]]</c>. Aplicațiile
     /// fără clasă NU se pun pe „neutru" — sunt numărate separat, ca utilizatorul să vadă cât
     /// din timp e încă neclasificat în loc să creadă că e neutru.
@@ -85,7 +105,7 @@ public static class PhoneUsage
     {
         var rules = cfg.PhoneApps
             .Where(p => p.Name.Trim().Length > 0)
-            .GroupBy(p => p.Name.Trim(), StringComparer.OrdinalIgnoreCase)
+            .GroupBy(p => MatchKey(p.Name), StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.Last(), StringComparer.OrdinalIgnoreCase);
 
         var byClass = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -98,8 +118,12 @@ public static class PhoneUsage
             foreach (var (name, minutes) in w.Apps)
             {
                 if (minutes <= 0) continue;
-                byApp[name] = byApp.GetValueOrDefault(name) + minutes;
-                if (rules.TryGetValue(name, out var rule))
+                // în clasament aplicația apare sub numele scurt: pe o lună care prinde două
+                // importuri, „9GAG" și „9GAG: Best LOL Pics & GIFs" sunt aceeași aplicație și
+                // ar fi ieșit două rânduri care se împart timpul între ele
+                var key = MatchKey(name);
+                byApp[key] = byApp.GetValueOrDefault(key) + minutes;
+                if (rules.TryGetValue(key, out var rule))
                 {
                     byClass[rule.Class] = byClass.GetValueOrDefault(rule.Class) + minutes;
                     if (rule.Project.Length > 0)

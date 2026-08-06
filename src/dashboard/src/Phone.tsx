@@ -32,6 +32,9 @@ Citește-le și răspunde DOAR cu un JSON valid, fără text în jur, în format
 Reguli:
 - "from" și "to" = intervalul afișat în capturi, în format yyyy-MM-dd. Apple scrie capătul
   EXCLUSIV: „Jul 13–20" înseamnă from 2026-07-13, to 2026-07-20 (adică zilele 13..19).
+- Dacă în capturi scrie „Last Week", „This Week" sau altceva relativ în loc de date, OMITE
+  complet "from" și "to". Nu ghici si nu calcula din data de azi — nu ai de unde sti cand
+  au fost facute capturile. Aplicatia cere utilizatorului sa aleaga saptamana.
 - "totalMinutes" = Total Screen Time al intervalului, convertit în minute (ex. 20h 0m = 1200).
 - "apps" = fiecare aplicație din lista Most Used, cu timpul convertit în minute (ex. 5h 0m = 300, 45m = 45).
 - Include toate aplicațiile vizibile, în ordinea din listă.
@@ -86,6 +89,38 @@ type Parsed = {
   notifications?: number | null;
 };
 
+/**
+ * Săptămânile pe care le poate alege utilizatorul când capturile scriu „Last Week" în loc
+ * de date. Le calculăm noi din ziua curentă și i le arătăm scrise pe litere: dacă l-am pune
+ * să tasteze intervalul, ar trebui să nimerească și ziua de start (luni), și convenția de
+ * capăt exclusiv — două ocazii de greșit pentru o informație pe care o știm oricum.
+ */
+function weekOptions(today: Date): { key: string; label: string; from: string; to: string }[] {
+  const iso = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const monday = new Date(today);
+  monday.setHours(0, 0, 0, 0);
+  monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+
+  const fmt = (d: Date) => d.toLocaleDateString("ro-RO", { day: "numeric", month: "short" });
+  const opts: { key: string; label: string; from: string; to: string }[] = [];
+  for (const [back, name] of [[1, "Săptămâna trecută"], [0, "Săptămâna curentă"], [2, "Acum două săptămâni"]] as const) {
+    const start = new Date(monday);
+    start.setDate(start.getDate() - back * 7);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 7);
+    const last = new Date(end);
+    last.setDate(last.getDate() - 1);
+    opts.push({
+      key: String(back),
+      label: `${name} — ${fmt(start)} → ${fmt(last)} (luni→duminică)`,
+      from: iso(start),
+      to: iso(end),
+    });
+  }
+  return opts;
+}
+
 function hm(minutes: number): string {
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
@@ -111,15 +146,21 @@ function validate(text: string): { data?: Parsed; error?: string } {
   }
   const o = obj as Record<string, unknown>;
   const iso = /^\d{4}-\d{2}-\d{2}$/;
-  if (typeof o.from !== "string" || !iso.test(o.from)) return { error: "Lipsește „from” (format yyyy-MM-dd)." };
-  if (typeof o.to !== "string" || !iso.test(o.to)) return { error: "Lipsește „to” (format yyyy-MM-dd)." };
-  if (new Date(o.to) <= new Date(o.from)) return { error: "„to” trebuie să fie după „from”." };
+  // Ecranul iPhone-ului scrie uneori „Last Week" în loc de date, iar asistentul AI n-are de
+  // unde ști ce zi e azi. Atunci lipsesc from/to și le alege utilizatorul dintr-o listă de
+  // săptămâni gata calculate — nu le scrie de mână, unde ar greși și capătul, și ziua de start.
+  const hasRange = typeof o.from === "string" && iso.test(o.from) && typeof o.to === "string" && iso.test(o.to);
+  if (hasRange && new Date(o.to as string) <= new Date(o.from as string)) {
+    return { error: "„to” trebuie să fie după „from”." };
+  }
   const total = Number(o.totalMinutes);
   if (!Number.isFinite(total) || total <= 0) return { error: "Lipsește „totalMinutes” (număr de minute)." };
 
-  const days = Math.round((new Date(o.to).getTime() - new Date(o.from).getTime()) / 86400000);
-  if (total > days * 1440) {
-    return { error: `„totalMinutes” (${total}) depășește câte minute are intervalul (${days * 1440}).` };
+  if (hasRange) {
+    const days = Math.round((new Date(o.to as string).getTime() - new Date(o.from as string).getTime()) / 86400000);
+    if (total > days * 1440) {
+      return { error: `„totalMinutes” (${total}) depășește câte minute are intervalul (${days * 1440}).` };
+    }
   }
 
   const apps: PhoneApp[] = Array.isArray(o.apps)
@@ -132,8 +173,8 @@ function validate(text: string): { data?: Parsed; error?: string } {
   return {
     data: {
       device: typeof o.device === "string" ? o.device : undefined,
-      from: o.from,
-      to: o.to,
+      from: hasRange ? (o.from as string) : "",
+      to: hasRange ? (o.to as string) : "",
       totalMinutes: Math.round(total),
       apps,
       pickups: Number.isFinite(Number(o.pickups)) ? Number(o.pickups) : null,
@@ -153,6 +194,9 @@ export default function Phone() {
   const [choices, setChoices] = useState<Record<string, { class: string; project: string }>>({});
   const [savingRules, setSavingRules] = useState(false);
   const [showAllApps, setShowAllApps] = useState(false);
+  // săptămâna aleasă când capturile scriau „Last Week": implicit cea trecută, care e cazul
+  // în care apare eticheta aia pe telefon
+  const [weekChoice, setWeekChoice] = useState("1");
   // sub-taburi: „Screen Time" e ce vrei să vezi zilnic, „Import" e o operație rară
   const [tab, setTab] = useState<"screentime" | "import">("screentime");
   const [mode, setMode] = useState<"week" | "month">("week");
@@ -216,7 +260,17 @@ export default function Phone() {
     }
   };
 
-  const { data: parsed, error: parseError } = validate(raw);
+  const { data: rawParsed, error: parseError } = validate(raw);
+
+  const weeks7 = useMemo(() => weekOptions(new Date()), []);
+  const needsRange = !!rawParsed && !rawParsed.from;
+  /** Ce se importă efectiv: intervalul din JSON dacă există, altfel cel ales de utilizator. */
+  const parsed = useMemo(() => {
+    if (!rawParsed) return rawParsed;
+    if (!needsRange) return rawParsed;
+    const w = weeks7.find((x) => x.key === weekChoice) ?? weeks7[0];
+    return { ...rawParsed, from: w.from, to: w.to };
+  }, [rawParsed, needsRange, weekChoice, weeks7]);
 
   /**
    * Numele dispozitivului face parte din identitatea unei perioade: retrimiterea aceleiași
@@ -251,6 +305,7 @@ export default function Phone() {
       await savePhoneWeek({ ...parsed, source: "screen-time-llm" });
       setRaw("");
       setShowAllApps(false);
+      setWeekChoice("1");
       setStatus("saved");
       await load();
       setTimeout(() => setStatus(""), 2500);
@@ -385,6 +440,27 @@ export default function Phone() {
           <>
             <div className="reclass-title" style={{ marginTop: 14 }}>Verifică înainte de import</div>
 
+            {needsRange ? (
+              <div className="week-pick">
+                <p className="hint" style={{ margin: "0 0 8px" }}>
+                  Capturile nu conțineau datele intervalului — pe telefon scria „Last Week"
+                  sau „This Week", iar asistentul AI n-avea de unde ști ce zi e azi.{" "}
+                  <b>Alege săptămâna</b>, ca importul să nu ajungă peste altă perioadă:
+                </p>
+                {weeks7.map((w) => (
+                  <label key={w.key} className={weekChoice === w.key ? "week-opt active" : "week-opt"}>
+                    <input
+                      type="radio"
+                      name="week-choice"
+                      checked={weekChoice === w.key}
+                      onChange={() => setWeekChoice(w.key)}
+                    />
+                    {w.label}
+                  </label>
+                ))}
+              </div>
+            ) : null}
+
             {sameRangeOtherDevice ? (
               <p className="warn-note">
                 Ai deja aceeași perioadă importată, dar sub alt nume de dispozitiv:{" "}
@@ -435,7 +511,8 @@ export default function Phone() {
               <button className="btn primary" onClick={importParsed} disabled={status === "saving"}>
                 {status === "saving" ? "Se importă…" : "Importă"}
               </button>
-              <button className="btn" onClick={() => { setRaw(""); setShowAllApps(false); }}>Renunță</button>
+              <button className="btn" onClick={() => { setRaw(""); setShowAllApps(false);
+      setWeekChoice("1"); }}>Renunță</button>
             </div>
           </>
         ) : null}

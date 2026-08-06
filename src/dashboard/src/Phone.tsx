@@ -203,6 +203,7 @@ export default function Phone() {
   const [anchor, setAnchor] = useState(() => new Date());
   const [phoneReport, setPhoneReport] = useState<Report | null>(null);
   const [showAllInReport, setShowAllInReport] = useState(false);
+  const [ruleBusy, setRuleBusy] = useState("");
 
   const [from, to] = useMemo(() => computeRange(mode, anchor), [mode, anchor]);
 
@@ -216,6 +217,27 @@ export default function Phone() {
       alive = false;
     };
   }, [tab, from, to, weeks]);
+
+  /**
+   * Schimbă clasa sau proiectul unei aplicații de telefon. Regula e întotdeauna PERMANENTĂ
+   * și se aplică retroactiv peste toate perioadele importate: Screen Time dă doar totaluri
+   * pe săptămână, deci nu există „doar în ziua asta" ca pe calculator. Reîncărcăm imediat
+   * raportul, fiindcă daemonul aplică schimbarea sincron la scriere.
+   */
+  const applyRule = async (name: string, cls: string, project: string) => {
+    setRuleBusy(name);
+    try {
+      await classifyPhoneApps([{ name, class: cls, project }]);
+      const [r, unc] = await Promise.all([fetchReport(from, to), fetchUnclassifiedPhoneApps()]);
+      setPhoneReport(r);
+      setPending(unc);
+      setError("");
+    } catch (e) {
+      setError(String(e instanceof Error ? e.message : e));
+    } finally {
+      setRuleBusy("");
+    }
+  };
 
   const shift = (dir: number) => {
     const a = new Date(anchor);
@@ -369,6 +391,9 @@ export default function Phone() {
           showAll={showAllInReport}
           onShowAll={setShowAllInReport}
           onGoImport={() => setTab("import")}
+          projects={pending.projects}
+          onRule={applyRule}
+          busy={ruleBusy}
         />
       ) : null}
 
@@ -626,6 +651,7 @@ export default function Phone() {
  */
 function ScreenTime({
   report, weeks, mode, from, to, onMode, onShift, onToday, showAll, onShowAll, onGoImport,
+  projects, onRule, busy,
 }: {
   report: Report | null;
   weeks: PhoneWeek[];
@@ -638,7 +664,12 @@ function ScreenTime({
   showAll: boolean;
   onShowAll: (v: boolean) => void;
   onGoImport: () => void;
+  projects: string[];
+  onRule: (name: string, cls: string, project: string) => void | Promise<void>;
+  busy: string;
 }) {
+  // cardul apăsat filtrează listele de dedesubt, exact ca pe Dashboard; null = toate
+  const [filter, setFilter] = useState<ClassName | "none" | null>(null);
   const ph = report?.phone;
   const has = (ph?.totalMinutes ?? 0) > 0;
   const appsSum = ph?.appsSumMinutes ?? 0;
@@ -647,7 +678,15 @@ function ScreenTime({
   // ridicările vin per perioadă importată, nu agregat — le însumăm pe cele din interval
   const pickups = (ph?.periods ?? []).reduce((sum, p) => sum + (p.pickups ?? 0), 0);
   const apps = ph?.apps ?? [];
-  const shown = showAll ? apps : apps.slice(0, 10);
+
+  // Screen Time amestecă site-urile printre aplicații („stiri.example" lângă „WhatsApp");
+  // le separăm ca pe calculator, unde Aplicații și Domenii sunt liste distincte
+  const isSite = (n: string) => n.includes(".") && !n.includes(" ");
+  const inClass = (a: { cls?: string | null }) =>
+    filter === null ? true : filter === "none" ? !a.cls : a.cls === filter;
+  const visible = apps.filter(inClass);
+  const appRows = visible.filter((a) => !isSite(a.name));
+  const siteRows = visible.filter((a) => isSite(a.name));
 
   return (
     <>
@@ -699,42 +738,48 @@ function ScreenTime({
               </p>
             ) : null}
 
-            <div className="phone-list" style={{ marginTop: 14 }}>
-              {(["productive", "neutral", "unproductive"] as ClassName[]).map((cls) => {
-                const v = ph!.byClass?.[cls] ?? 0;
-                if (v <= 0) return null;
-                return (
-                  <div className="phone-list-row" key={cls}>
-                    <span>
-                      <i className="swatch-inline" style={{ background: CLASS_VAR[cls] }} aria-hidden="true" />
-                      {CLASS_LABEL[cls]}
-                    </span>
-                    <span className="val">
-                      <b>{pct(v)}%</b>
-                      <span className="meta">{fmtMin(v)} după cifrele Apple</span>
-                    </span>
-                  </div>
-                );
-              })}
-              {ph!.unclassifiedMinutes > 0 ? (
-                <div className="phone-list-row">
-                  <span className="range-label">
-                    neclasificat
-                    <span className="meta">
-                      <button className="link-btn" onClick={onGoImport}>clasifică-le</button>
-                    </span>
-                  </span>
-                  <span className="val">
-                    <b>{pct(ph!.unclassifiedMinutes)}%</b>
-                    <span className="meta">{fmtMin(ph!.unclassifiedMinutes)} după cifrele Apple</span>
-                  </span>
-                </div>
-              ) : null}
+            <div className="tiles phone-tiles">
+              {([
+                [null, "Tot timpul", ph!.totalMinutes, null],
+                ["productive", CLASS_LABEL.productive, ph!.byClass?.productive ?? 0, CLASS_VAR.productive],
+                ["neutral", CLASS_LABEL.neutral, ph!.byClass?.neutral ?? 0, CLASS_VAR.neutral],
+                ["unproductive", CLASS_LABEL.unproductive, ph!.byClass?.unproductive ?? 0, CLASS_VAR.unproductive],
+                ["none", "Neclasificat", ph!.unclassifiedMinutes, null],
+              ] as [ClassName | "none" | null, string, number, string | null][])
+                .filter(([key, , min]) => key !== "none" || min > 0)
+                .map(([key, label, min, color]) => (
+                  <button
+                    key={label}
+                    className={`tile clickable${filter === key ? " selected" : ""}${filter !== null && filter !== key ? " dim" : ""}`}
+                    onClick={() => setFilter(filter === key ? null : key)}
+                  >
+                    <div className="label">
+                      {color ? <span className="dot" style={{ background: color }} /> : null}
+                      {label}
+                    </div>
+                    <div className="value">
+                      {key === null ? fmtMin(min) : `${pct(min)}%`}
+                    </div>
+                    <div className="sub">
+                      {key === null
+                        ? `${fmtMin(Math.round(min / days))} pe zi, în medie`
+                        : `${fmtMin(min)} după cifrele Apple`}
+                    </div>
+                  </button>
+                ))}
             </div>
+
+            {pickups > 0 ? (
+              <p className="hint" style={{ marginTop: 10, marginBottom: 0 }}>
+                <b>{pickups}</b> ridicări ale telefonului — <b>{Math.round(pickups / days)}</b> pe
+                zi, adică una la <b>~{Math.round((16 * 60) / Math.max(1, pickups / days))} min</b>{" "}
+                de veghe. Cifra asta spune cât de <i>des</i>, nu cât de <i>mult</i>.
+              </p>
+            ) : null}
 
             {Object.keys(ph!.byProject).length > 0 ? (
               <>
-                <div className="reclass-title" style={{ marginTop: 16 }}>Pe proiecte</div>
+                <div className="reclass-title" style={{ marginTop: 18 }}>Pe proiecte</div>
                 <div className="phone-list">
                   {Object.entries(ph!.byProject).map(([name, minutes]) => (
                     <div className="phone-list-row" key={name}>
@@ -746,24 +791,28 @@ function ScreenTime({
               </>
             ) : null}
 
-            {apps.length > 0 ? (
-              <>
-                <div className="reclass-title" style={{ marginTop: 16 }}>Aplicații și site-uri</div>
-                <div className="phone-list">
-                  {shown.map((a) => (
-                    <div className="phone-list-row" key={a.name}>
-                      <span>{a.name}</span>
-                      <span className="val">{fmtMin(a.minutes)}</span>
-                    </div>
-                  ))}
-                  {apps.length > 10 ? (
-                    <button className="link-btn" onClick={() => onShowAll(!showAll)}>
-                      {showAll ? "arată mai puțin" : `…și încă ${apps.length - 10} — arată-le`}
-                    </button>
-                  ) : null}
-                </div>
-              </>
-            ) : null}
+            <div className="columns" style={{ marginTop: 18 }}>
+              <PhoneEditor
+                title="Aplicații"
+                rows={appRows}
+                total={appsSum}
+                projects={projects}
+                onRule={onRule}
+                busy={busy}
+                showAll={showAll}
+                onShowAll={onShowAll}
+              />
+              <PhoneEditor
+                title="Site-uri"
+                rows={siteRows}
+                total={appsSum}
+                projects={projects}
+                onRule={onRule}
+                busy={busy}
+                showAll={showAll}
+                onShowAll={onShowAll}
+              />
+            </div>
 
             {appsSum !== ph!.totalMinutes ? (
               <p className="hint" style={{ marginTop: 12 }}>
@@ -806,5 +855,95 @@ function ScreenTime({
         </p>
       </section>
     </>
+  );
+}
+
+/**
+ * Lista editabilă de aplicații (sau site-uri) de pe telefon. Aceleași gesturi ca pe
+ * Dashboard: butoanele colorate mută activitatea în altă clasă, dropdown-ul o pune pe un
+ * proiect. Diferența față de calculator: regula e mereu permanentă și se aplică peste
+ * TOATE perioadele importate — Screen Time dă totaluri pe săptămână, nu evenimente cu ore,
+ * deci „doar în ziua asta" n-ar avea unde să se aplice.
+ */
+function PhoneEditor({ title, rows, total, projects, onRule, busy, showAll, onShowAll }: {
+  title: string;
+  rows: { name: string; minutes: number; cls?: string | null; project?: string | null }[];
+  total: number;
+  projects: string[];
+  onRule: (name: string, cls: string, project: string) => void | Promise<void>;
+  busy: string;
+  showAll: boolean;
+  onShowAll: (v: boolean) => void;
+}) {
+  const LIMIT = 12;
+  const shown = showAll ? rows : rows.slice(0, LIMIT);
+  const classes: ClassName[] = ["productive", "neutral", "unproductive"];
+
+  return (
+    <div className="dev-col">
+      <h3>{title}</h3>
+      {rows.length === 0 ? (
+        <div className="empty">Nimic aici în intervalul afișat.</div>
+      ) : (
+        <div className="barlist">
+          {shown.map((a) => {
+            const cls = (a.cls as ClassName | undefined) ?? null;
+            return (
+              <div className="row reclass-row phone-row" key={a.name}>
+                <span className="name" title={a.name}>
+                  {cls ? (
+                    <span className="dot" style={{ background: CLASS_VAR[cls] }} />
+                  ) : (
+                    <span className="dot" style={{ background: "var(--track)" }} title="fără clasă" />
+                  )}
+                  {a.name}
+                </span>
+                <span className="track" title={`${fmtMin(a.minutes)} din ${fmtMin(total)}`}>
+                  <span
+                    className="bar"
+                    style={{
+                      width: `${total > 0 ? (a.minutes / total) * 100 : 0}%`,
+                      background: cls ? CLASS_VAR[cls] : "var(--text-secondary)",
+                      opacity: cls ? 1 : 0.35,
+                    }}
+                  />
+                </span>
+                <span className="val">{fmtMin(a.minutes)}</span>
+                <span className="mini-btns">
+                  {classes
+                    .filter((c) => c !== cls)
+                    .map((c) => (
+                      <button
+                        key={c}
+                        disabled={busy === a.name}
+                        title={`Mută „${a.name}" în ${CLASS_LABEL[c]} — în toate perioadele`}
+                        style={{ background: CLASS_VAR[c] }}
+                        onClick={() => void onRule(a.name, c, a.project ?? "")}
+                      />
+                    ))}
+                </span>
+                <select
+                  className="proj-select"
+                  value={a.project ?? ""}
+                  disabled={busy === a.name}
+                  title="Pune timpul acestei aplicații pe un proiect"
+                  onChange={(e) => void onRule(a.name, cls ?? "neutral", e.target.value)}
+                >
+                  <option value="">— fără proiect —</option>
+                  {projects.map((p) => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
+              </div>
+            );
+          })}
+          {rows.length > LIMIT ? (
+            <button className="link-btn" onClick={() => onShowAll(!showAll)}>
+              {showAll ? "arată mai puțin" : `…și încă ${rows.length - LIMIT} — arată-le`}
+            </button>
+          ) : null}
+        </div>
+      )}
+    </div>
   );
 }

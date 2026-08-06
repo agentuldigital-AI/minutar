@@ -67,7 +67,7 @@ export interface PhoneSummary {
   byClass: Record<string, number>;
   byProject: Record<string, number>;
   unclassifiedMinutes: number;
-  apps: { name: string; minutes: number }[];
+  apps: { name: string; minutes: number; cls?: string | null; project?: string | null }[];
   appsSumMinutes: number;
   periods: {
     device: string;

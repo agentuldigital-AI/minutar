@@ -662,3 +662,24 @@ footer { margin-top: 30px; font-size: 12px; color: var(--text-secondary); displa
   font-weight: 600;
 }
 .week-opt input { accent-color: var(--accent); }
+
+/* ---- pagina Telefon: carduri-filtru + editor pe aplicatii ---- */
+/* Cardurile sunt <button>: se apasa ca filtru, deci trebuie sa arate ca restul .tile,
+   nu ca un buton de formular. */
+.phone-tiles { margin: 14px 0 0; }
+.phone-tiles .tile {
+  font: inherit; text-align: left; color: inherit; cursor: pointer;
+  display: flex; flex-direction: column;
+}
+
+/* Randul de editare are aceleasi coloane ca pe Dashboard, dar mai stranse: pe telefon
+   numele sunt scurte si nu exista sub-randuri de alocare. */
+.barlist .row.phone-row {
+  grid-template-columns: minmax(120px, 1fr) 90px 56px 46px 130px;
+  gap: 10px;
+}
+.phone-row .name { display: flex; align-items: center; min-width: 0; }
+.phone-row .name .dot { margin-right: 7px; }
+.phone-row .track { height: 8px; }
+.phone-row .bar { height: 8px; border-radius: 4px; }
+.phone-row .val { font-size: 12px; }

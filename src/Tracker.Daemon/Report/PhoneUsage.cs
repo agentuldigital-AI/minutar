@@ -145,7 +145,20 @@ public static class PhoneUsage
             byClass,
             byProject = byProject.OrderByDescending(kv => kv.Value).ToDictionary(kv => kv.Key, kv => kv.Value),
             unclassifiedMinutes = unclassified,
-            apps = byApp.OrderByDescending(kv => kv.Value).Take(20).Select(kv => new { name = kv.Key, minutes = kv.Value }),
+            // fiecare aplicație vine cu clasa și proiectul ei: pagina Telefon e un editor,
+            // nu doar o listă, iar fără astea ar trebui să reconstruiască regulile din config
+            // și să repete potrivirea pe MatchKey — o a doua implementare care ar diverge
+            apps = byApp.OrderByDescending(kv => kv.Value).Select(kv =>
+            {
+                rules.TryGetValue(MatchKey(kv.Key), out var r);
+                return new
+                {
+                    name = kv.Key,
+                    minutes = kv.Value,
+                    cls = r?.Class,
+                    project = r is { Project.Length: > 0 } ? r.Project : null,
+                };
+            }),
             // Apple raportează un total mai mic decât suma aplicațiilor (site-urile se
             // numără și în browser, iar „Total Screen Time" se calculează altfel). Îl
             // expunem ca să poată fi arătat, nu ascuns ca o eroare de-a noastră.

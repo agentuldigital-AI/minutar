@@ -1,29 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { assignClassForDay, assignMinutesForDay, assignToProject, assignToProjectForDay, createProject, fetchClaudeCwds, fetchConfig, fetchDay, fetchReport, focusStart, focusStop, reclassify, removeDayAssignment, saveConfig, saveDay, unassignFromProject, type ConfigData, type DayAssignment, type DayState, type HeatmapRow, type NamedSeconds, type Report } from "./api";
-
-type Mode = "day" | "week" | "month";
-type ClassName = "productive" | "neutral" | "unproductive";
-
-const CLASS_LABEL: Record<ClassName, string> = {
-  productive: "Productiv",
-  neutral: "Neutru",
-  unproductive: "Neproductiv",
-};
-const CLASS_VAR: Record<ClassName, string> = {
-  productive: "var(--cls-productive)",
-  neutral: "var(--cls-neutral)",
-  unproductive: "var(--cls-unproductive)",
-};
-
-function fmtMin(minutes: number): string {
-  return fmt(minutes * 60);
-}
-
-function fmt(s: number): string {
-  if (s >= 3600) return `${Math.floor(s / 3600)}h ${Math.round((s % 3600) / 60)}m`;
-  if (s >= 60) return `${Math.round(s / 60)}m`;
-  return `${Math.round(s)}s`;
-}
+import { CLASS_LABEL, CLASS_VAR, computeRange, fmt, fmtMin, rangeLabel, type ClassName, type Mode } from "./shared";
 
 /**
  * Bară cu procent „stil baterie": lungimea = ponderea în TOTALUL listei (nu în maxim),
@@ -68,35 +45,6 @@ function hmValue(row: HeatmapRow, h: number, cls: ClassName | null): number {
   if (cls === "unproductive") return row.unproductive[h];
   if (cls === "neutral") return Math.max(0, row.active[h] - row.productive[h] - row.unproductive[h]);
   return row.active[h];
-}
-
-function computeRange(mode: Mode, anchor: Date): [Date, Date] {
-  const from = new Date(anchor);
-  from.setHours(0, 0, 0, 0);
-  const to = new Date(from);
-  if (mode === "day") {
-    to.setDate(to.getDate() + 1);
-  } else if (mode === "week") {
-    const dow = (from.getDay() + 6) % 7; // Monday-first
-    from.setDate(from.getDate() - dow);
-    to.setTime(from.getTime());
-    to.setDate(to.getDate() + 7);
-  } else {
-    from.setDate(1);
-    to.setTime(from.getTime());
-    to.setMonth(to.getMonth() + 1);
-  }
-  return [from, to];
-}
-
-function rangeLabel(mode: Mode, from: Date, to: Date): string {
-  const optsDay: Intl.DateTimeFormatOptions = { day: "numeric", month: "short" };
-  if (mode === "day") return from.toLocaleDateString("ro-RO", { weekday: "short", day: "numeric", month: "long" });
-  if (mode === "week") {
-    const end = new Date(to.getTime() - 1);
-    return `${from.toLocaleDateString("ro-RO", optsDay)} – ${end.toLocaleDateString("ro-RO", optsDay)}`;
-  }
-  return from.toLocaleDateString("ro-RO", { month: "long", year: "numeric" });
 }
 
 interface Tooltip {
@@ -241,77 +189,15 @@ export default function Dashboard() {
     : undefined;
 
   /**
-   * PC + telefon la un loc. Screen Time vine pe perioade întregi (o săptămână), nu pe
-   * ore, așa că pe „Zi" nu se poate defalca fără să inventăm precizie — de aceea blocul
-   * apare doar pe săptămână și lună.
+   * Cât timp de telefon există în intervalul afișat. Doar atât: Dashboard-ul e strict
+   * despre calculator, iar amestecul celor două surse a fost mutat în tabul „Total".
+   * Aici rămâne o singură linie care spune că restul EXISTĂ, ca cifrele de mai sus să
+   * nu fie citite ca „tot timpul meu".
    */
-  const combined = useMemo(() => {
+  const phoneHint = useMemo(() => {
     const ph = report?.phone;
-    if (!report || !ph || ph.totalMinutes <= 0 || mode === "day") return null;
-
-    // Suma aplicațiilor din Screen Time NU e egală cu totalul afișat de Apple, iar
-    // raportul nu e stabil: verificat pe trei perioade reale, aplicațiile au ieșit cu
-    // 9% SUB total într-o zi și cu 38% PESTE în alta (26 iulie: Safari 1h17m + 9GAG
-    // 1h1m depășeau singure totalul zilei de 2h10m). Orice regulă fixă de reconciliere
-    // ar fi o inventie. Deci:
-    //   • totalul = cifra Apple, neatinsă;
-    //   • cifrele per aplicație = brute, neatinse (vezi clasamentele mai jos);
-    //   • defalcarea pe clase = DOAR proporții, aplicate pe totalul Apple, marcate „≈",
-    //     fiindcă Apple nu ofera nicio alta cale de a imparti totalul pe clase.
-    const shareOf = (minutes: number) => (ph.appsSumMinutes > 0 ? minutes / ph.appsSumMinutes : 0);
-    const estSec = (minutes: number) => Math.round(shareOf(minutes) * ph.totalMinutes * 60);
-
-    const pcByClass = report.totals.byClass ?? {};
-    const classes = (["productive", "neutral", "unproductive"] as ClassName[]).map((cls) => ({
-      cls,
-      pc: pcByClass[cls] ?? 0,
-      phone: estSec(ph.byClass?.[cls] ?? 0),
-      phonePct: Math.round(shareOf(ph.byClass?.[cls] ?? 0) * 100),
-    }));
-
-    // în listele Screen Time, site-urile stau lângă aplicații („mediafax.ro" lângă
-    // „WhatsApp"); le separăm ca să nu amestecăm două leaderboard-uri diferite
-    const isSite = (name: string) => name.includes(".") && !name.includes(" ");
-    const merge = (pc: NamedSeconds[], phone: { name: string; minutes: number }[]) => {
-      const key = (n: string) => n.toLowerCase().replace(/\.exe$/, "").trim();
-      const map = new Map<string, { name: string; seconds: number; pc: boolean; phone: boolean }>();
-      for (const i of pc) {
-        const k = key(i.name);
-        const e = map.get(k) ?? { name: i.name, seconds: 0, pc: false, phone: false };
-        e.seconds += i.seconds;
-        e.pc = true;
-        map.set(k, e);
-      }
-      for (const a of phone) {
-        const k = key(a.name);
-        const e = map.get(k) ?? { name: a.name, seconds: 0, pc: false, phone: false };
-        // brut, exact cum îl dă Apple — clasamentul răspunde la „cât zice Apple că am
-        // stat pe X", nu la „ce parte din total"; acolo unde ajustăm, spunem explicit
-        e.seconds += a.minutes * 60;
-        e.phone = true;
-        map.set(k, e);
-      }
-      return [...map.values()]
-        .filter((e) => e.seconds > 0)
-        .sort((a, b) => b.seconds - a.seconds)
-        .slice(0, 10);
-    };
-
-    const phoneSeconds = ph.totalMinutes * 60;
-    return {
-      pcSeconds: report.totals.activeSeconds,
-      phoneSeconds,
-      totalSeconds: report.totals.activeSeconds + phoneSeconds,
-      classes,
-      unclassified: estSec(ph.unclassifiedMinutes),
-      unclassifiedPct: Math.round(shareOf(ph.unclassifiedMinutes) * 100),
-      // diferența dintre suma aplicațiilor și totalul Apple, ca s-o putem ARĂTA
-      gapMinutes: ph.appsSumMinutes - ph.totalMinutes,
-      appsSumMinutes: ph.appsSumMinutes,
-      phoneTotalMinutes: ph.totalMinutes,
-      apps: merge(report.byApp ?? [], ph.apps.filter((a) => !isSite(a.name))),
-      sites: merge(report.byDomain ?? [], ph.apps.filter((a) => isSite(a.name))),
-    };
+    if (!ph || ph.totalMinutes <= 0 || mode === "day") return null;
+    return fmtMin(ph.totalMinutes);
   }, [report, mode]);
 
   // săptămână/lună: agregare pe zi din segmentele (deja filtrate pe clasă/proiect)
@@ -477,6 +363,14 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {phoneHint ? (
+        <p className="scope-note">
+          Cifrele de mai sus sunt <b>doar de pe calculator</b>. În același interval ai și{" "}
+          <b>{phoneHint}</b> pe telefon, care nu se adună aici —{" "}
+          <a href="#devices">vezi totalul pe dispozitive</a>.
+        </p>
+      ) : null}
+
       {(() => {
         // desfășurătorul unei clase — refolosit și la filtrul pe o singură clasă (expandat),
         // și stivuit ×3 la click pe „Timp activ total" (acordeon, collapsed implicit)
@@ -615,216 +509,6 @@ export default function Dashboard() {
           <span>mult</span>
         </div>
       </section>
-
-      {combined ? (
-        <section className="card">
-          <h2>Total pe dispozitive</h2>
-          <p className="hint">
-            PC + telefon la un loc. Bara plină = PC (cronometrat de noi), partea
-            transparentă = telefon (raportat de Apple). Screen Time vine pe săptămâni
-            întregi, de aceea blocul apare doar pe săptămână și lună.
-          </p>
-
-          <div className="dev-total">
-            <b>{fmt(combined.totalSeconds)}</b>
-            <span className="range-label">
-              PC {fmt(combined.pcSeconds)} · telefon {fmt(combined.phoneSeconds)}
-            </span>
-          </div>
-
-          <p className="hint" style={{ marginTop: 8 }}>
-            Rândurile de mai jos împart totalul telefonului după <b>proporțiile</b>{" "}
-            aplicațiilor, de aceea sunt marcate „≈": Apple nu spune cât din total a fost
-            productiv sau nu.{" "}
-            {combined.gapMinutes !== 0 ? (
-              <>
-                Cifrele lui nici nu se închid între ele — aplicațiile adună{" "}
-                <b>{fmtMin(combined.appsSumMinutes)}</b> față de totalul de{" "}
-                <b>{fmtMin(combined.phoneTotalMinutes)}</b>
-                {" ("}
-                {combined.gapMinutes > 0 ? "+" : ""}
-                {Math.round((combined.gapMinutes / combined.phoneTotalMinutes) * 100)}%).
-                Nu le „reparăm": totalul rămâne cifra lui, iar în clasamente aplicațiile
-                rămân exact cum le dă el.
-              </>
-            ) : null}
-          </p>
-
-          <div className="barlist" style={{ marginTop: 12 }}>
-            {combined.classes.map((r) => {
-              const tot = r.pc + r.phone;
-              const pct = combined.totalSeconds > 0 ? (tot / combined.totalSeconds) * 100 : 0;
-              const pcW = combined.totalSeconds > 0 ? (r.pc / combined.totalSeconds) * 100 : 0;
-              return (
-                <div className="row" key={r.cls}>
-                  <span className="name">
-                    <span className="dot" style={{ background: CLASS_VAR[r.cls] }} />
-                    {CLASS_LABEL[r.cls]}
-                  </span>
-                  <span className="track">
-                    <span
-                      className="bar"
-                      style={{
-                        left: 0, width: `${pcW}%`, background: CLASS_VAR[r.cls],
-                        borderRadius: r.phone > 0 ? "5px 0 0 5px" : undefined,
-                      }}
-                    />
-                    <span
-                      className="bar"
-                      style={{
-                        left: `${pcW}%`,
-                        width: `${combined.totalSeconds > 0 ? (r.phone / combined.totalSeconds) * 100 : 0}%`,
-                        background: CLASS_VAR[r.cls], opacity: 0.42,
-                      }}
-                    />
-                  </span>
-                  <span
-                    className="val"
-                    title={
-                      r.phone > 0
-                        ? `PC ${fmt(r.pc)} (măsurat) · telefon ≈${fmt(r.phone)} = ${r.phonePct}% din timpul de telefon`
-                        : `PC ${fmt(r.pc)} (măsurat)`
-                    }
-                  >
-                    {r.phone > 0 ? "≈" : ""}{fmt(tot)} · {Math.round(pct)}%
-                  </span>
-                </div>
-              );
-            })}
-            {combined.unclassified > 0 ? (
-              <div className="row">
-                <span className="name range-label">neclasificat (telefon)</span>
-                <span className="track">
-                  <span
-                    className="bar"
-                    style={{
-                      left: 0,
-                      width: `${combined.totalSeconds > 0 ? (combined.unclassified / combined.totalSeconds) * 100 : 0}%`,
-                      background: "var(--track-strong, var(--text-secondary))", opacity: 0.35,
-                    }}
-                  />
-                </span>
-                <span
-                  className="val"
-                  title={`${combined.unclassifiedPct}% din timpul de telefon, în aplicații fără clasă`}
-                >
-                  ≈{fmt(combined.unclassified)}
-                </span>
-              </div>
-            ) : null}
-          </div>
-
-          <div className="columns" style={{ marginTop: 18 }}>
-            <DeviceList title="Top aplicații" items={combined.apps} />
-            <DeviceList title="Top site-uri" items={combined.sites} />
-          </div>
-        </section>
-      ) : null}
-
-      {report?.phone && report.phone.totalMinutes > 0 && mode !== "day" ? (
-        <section className="card">
-          <h2>Timp pe telefon</h2>
-          <p className="hint">
-            Din Screen Time, importat manual — totaluri raportate de Apple pe perioade, nu timp
-            cronometrat. De aceea stă separat și NU se adună la orele de mai sus.
-          </p>
-
-          <div className="phone-preview" style={{ marginTop: 10 }}>
-            <span>
-              total <b>{fmtMin(report.phone.totalMinutes)}</b>
-            </span>
-            {report.phone.periods.map((p) => (
-              <span key={`${p.device}-${p.from}`} className="range-label">
-                {p.from} → {p.to}: {fmtMin(p.totalMinutes)} ({fmtMin(p.avgDailyMinutes)}/zi)
-              </span>
-            ))}
-          </div>
-
-          <div className="phone-list" style={{ marginTop: 14 }}>
-            {(["productive", "neutral", "unproductive"] as ClassName[]).map((cls) => {
-              const v = report.phone!.byClass?.[cls] ?? 0;
-              if (v <= 0) return null;
-              // procentul e cifra de încredere aici: minutele vin din lista de aplicații,
-              // a cărei sumă nu e egală cu totalul de mai sus
-              const pct = report.phone!.appsSumMinutes > 0
-                ? Math.round((v / report.phone!.appsSumMinutes) * 100)
-                : 0;
-              return (
-                <div className="phone-list-row" key={cls}>
-                  <span>
-                    <i
-                      className="swatch-inline"
-                      style={{ background: CLASS_VAR[cls] }}
-                      aria-hidden="true"
-                    />
-                    {CLASS_LABEL[cls]}
-                  </span>
-                  <span className="val">
-                    <b>{pct}%</b>
-                    <span className="meta">{fmtMin(v)} după cifrele Apple</span>
-                  </span>
-                </div>
-              );
-            })}
-            {report.phone.unclassifiedMinutes > 0 ? (
-              <div className="phone-list-row">
-                <span className="range-label">
-                  neclasificat
-                  <span className="meta">clasifică-le în pagina Telefon</span>
-                </span>
-                <span className="val">
-                  <b>
-                    {report.phone.appsSumMinutes > 0
-                      ? Math.round((report.phone.unclassifiedMinutes / report.phone.appsSumMinutes) * 100)
-                      : 0}
-                    %
-                  </b>
-                  <span className="meta">{fmtMin(report.phone.unclassifiedMinutes)} după cifrele Apple</span>
-                </span>
-              </div>
-            ) : null}
-          </div>
-
-          {Object.keys(report.phone.byProject).length > 0 ? (
-            <>
-              <div className="reclass-title" style={{ marginTop: 16 }}>Pe proiecte</div>
-              <div className="phone-list">
-                {Object.entries(report.phone.byProject).map(([name, minutes]) => (
-                  <div className="phone-list-row" key={name}>
-                    <span>{name}</span>
-                    <span className="val">{fmtMin(minutes)}</span>
-                  </div>
-                ))}
-              </div>
-            </>
-          ) : null}
-
-          {report.phone.apps.length > 0 ? (
-            <>
-              <div className="reclass-title" style={{ marginTop: 16 }}>Aplicații</div>
-              <div className="phone-list">
-                {report.phone.apps.slice(0, 8).map((a) => (
-                  <div className="phone-list-row" key={a.name}>
-                    <span>{a.name}</span>
-                    <span className="val">{fmtMin(a.minutes)}</span>
-                  </div>
-                ))}
-              </div>
-            </>
-          ) : null}
-
-          {report.phone.appsSumMinutes !== report.phone.totalMinutes ? (
-            <p className="hint" style={{ marginTop: 10 }}>
-              Cifrele Apple nu se închid între ele: aplicațiile adună{" "}
-              {fmtMin(report.phone.appsSumMinutes)}, iar totalul afișat e{" "}
-              {fmtMin(report.phone.totalMinutes)}. Diferența nu are un sens constant — pe date
-              reale a ieșit și în plus, și în minus — așa că nu o „reparăm": totalul rămâne cifra
-              Apple, aplicațiile rămân exact cum le dă Apple, iar procentele de mai sus sunt
-              partea în care poți avea încredere.
-            </p>
-          ) : null}
-        </section>
-      ) : null}
 
       <section className="card">
         <h2>Timeline</h2>
@@ -1822,43 +1506,6 @@ function ReclassList({
               suma alocărilor nu poate depăși totalul. Restul rămâne pe standard.
             </div>
           </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/**
- * Clasament peste ambele dispozitive. Badge-ul spune de unde vine timpul: fără el,
- * „WhatsApp 5h" ar putea fi de pe PC, de pe telefon sau amândouă, iar diferența
- * schimbă ce faci cu informația.
- */
-function DeviceList({ title, items }: {
-  items: { name: string; seconds: number; pc: boolean; phone: boolean }[];
-  title: string;
-}) {
-  const max = Math.max(1, ...items.map((i) => i.seconds));
-  return (
-    <div className="dev-col">
-      <h3>{title}</h3>
-      {items.length === 0 ? (
-        <div className="empty">Fără date în interval.</div>
-      ) : (
-        <div className="barlist">
-          {items.map((i) => (
-            <div className="row" key={i.name}>
-              <span className="name" title={i.name}>
-                <span className="dev-badge" title={i.pc && i.phone ? "PC și telefon" : i.phone ? "telefon" : "PC"}>
-                  {i.pc && i.phone ? "pc+tel" : i.phone ? "tel" : "pc"}
-                </span>
-                {i.name}
-              </span>
-              <span className="track">
-                <span className="bar" style={{ width: `${(i.seconds / max) * 100}%`, background: "var(--bar-window)" }} />
-              </span>
-              <span className="val">{fmt(i.seconds)}</span>
-            </div>
-          ))}
         </div>
       )}
     </div>

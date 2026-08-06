@@ -1,16 +1,18 @@
 import { useEffect, useState } from "react";
 import Dashboard from "./Dashboard";
+import Devices from "./Devices";
 import Journal from "./Journal";
 import Phone from "./Phone";
 import Settings from "./Settings";
 import Weekly from "./Weekly";
 
-type View = "dash" | "weekly" | "journal" | "phone" | "settings";
+type View = "dash" | "weekly" | "journal" | "devices" | "phone" | "settings";
 
 function viewFromHash(): View {
   if (window.location.hash === "#settings") return "settings";
   if (window.location.hash === "#weekly") return "weekly";
   if (window.location.hash === "#journal") return "journal";
+  if (window.location.hash === "#devices") return "devices";
   if (window.location.hash === "#phone") return "phone";
   return "dash";
 }
@@ -49,6 +51,9 @@ export default function App() {
           <button className={view === "phone" ? "active" : ""} onClick={() => go("phone")}>
             Telefon
           </button>
+          <button className={view === "devices" ? "active" : ""} onClick={() => go("devices")}>
+            Total
+          </button>
           <button className={view === "settings" ? "active" : ""} onClick={() => go("settings")}>
             Setări
           </button>
@@ -60,6 +65,8 @@ export default function App() {
         <Weekly />
       ) : view === "journal" ? (
         <Journal />
+      ) : view === "devices" ? (
+        <Devices />
       ) : view === "phone" ? (
         <Phone />
       ) : (

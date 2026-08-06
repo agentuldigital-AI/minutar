@@ -589,3 +589,31 @@ footer { margin-top: 30px; font-size: 12px; color: var(--text-secondary); displa
   color: var(--accent); font-size: 12px; font-family: inherit;
 }
 .link-btn:hover { text-decoration: underline; }
+
+/* ---- sub-taburi (Telefon: Screen Time / Import) ---- */
+.subtabs { display: flex; gap: 4px; margin: 4px 0 14px; border-bottom: 1px solid var(--border); }
+.subtabs button {
+  border: none; background: transparent; color: var(--text-secondary);
+  font-size: 13px; font-weight: 600; font-family: inherit;
+  padding: 8px 14px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.subtabs button:hover { color: var(--text-primary); }
+.subtabs button.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* Linia care spune ca cifrele de deasupra sunt DOAR de pe calculator. Sta imediat sub
+   carduri, nu la finalul paginii: scopul trebuie stiut inainte sa citesti cifrele. */
+.scope-note {
+  margin: 0 0 4px; padding: 9px 12px; font-size: 12.5px;
+  color: var(--text-secondary); background: var(--card-2);
+  border: 1px solid var(--border); border-radius: 10px;
+}
+.scope-note a { color: var(--accent); }
+
+/* Avertisment inainte de o actiune care nu se poate anula usor (import care se ADUNA
+   in loc sa suprascrie). Galben, nu rosu: nu e o eroare, e o consecinta neasteptata. */
+.warn-note {
+  margin: 10px 0 0; padding: 10px 12px; font-size: 12.5px; line-height: 1.5;
+  color: var(--text-primary); background: color-mix(in srgb, var(--bar-claude) 12%, var(--card));
+  border: 1px solid color-mix(in srgb, var(--bar-claude) 45%, var(--border));
+  border-radius: 10px;
+}

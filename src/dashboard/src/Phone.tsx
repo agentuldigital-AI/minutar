@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
-  classifyPhoneApps, fetchPhoneWeeks, fetchUnclassifiedPhoneApps, savePhoneWeek,
-  type PhoneApp, type PhoneWeek, type UnclassifiedPhone,
+  classifyPhoneApps, fetchPhoneWeeks, fetchReport, fetchUnclassifiedPhoneApps, savePhoneWeek,
+  type PhoneApp, type PhoneWeek, type Report, type UnclassifiedPhone,
 } from "./api";
+import { CLASS_LABEL, CLASS_VAR, computeRange, fmtMin, rangeLabel, type ClassName } from "./shared";
 
 /**
  * Import pentru timpul de pe telefon. iOS nu are export de Screen Time — datele
@@ -143,6 +144,32 @@ export default function Phone() {
   const [choices, setChoices] = useState<Record<string, { class: string; project: string }>>({});
   const [savingRules, setSavingRules] = useState(false);
   const [showAllApps, setShowAllApps] = useState(false);
+  // sub-taburi: „Screen Time" e ce vrei să vezi zilnic, „Import" e o operație rară
+  const [tab, setTab] = useState<"screentime" | "import">("screentime");
+  const [mode, setMode] = useState<"week" | "month">("week");
+  const [anchor, setAnchor] = useState(() => new Date());
+  const [phoneReport, setPhoneReport] = useState<Report | null>(null);
+  const [showAllInReport, setShowAllInReport] = useState(false);
+
+  const [from, to] = useMemo(() => computeRange(mode, anchor), [mode, anchor]);
+
+  useEffect(() => {
+    if (tab !== "screentime") return;
+    let alive = true;
+    fetchReport(from, to)
+      .then((r) => alive && setPhoneReport(r))
+      .catch(() => alive && setPhoneReport(null));
+    return () => {
+      alive = false;
+    };
+  }, [tab, from, to, weeks]);
+
+  const shift = (dir: number) => {
+    const a = new Date(anchor);
+    if (mode === "week") a.setDate(a.getDate() + dir * 7);
+    else a.setMonth(a.getMonth() + dir);
+    setAnchor(a);
+  };
 
   const load = () =>
     Promise.all([fetchPhoneWeeks(), fetchUnclassifiedPhoneApps()])
@@ -181,6 +208,21 @@ export default function Phone() {
   };
 
   const { data: parsed, error: parseError } = validate(raw);
+
+  /**
+   * Numele dispozitivului face parte din identitatea unei perioade: retrimiterea aceleiași
+   * săptămâni o CORECTEAZĂ doar dacă numele coincide. Cu nume diferite („iPhone" vs
+   * „iPhone-ul meu") ajung două înregistrări care se adună, iar totalul se dublează în
+   * tăcere. E o capcană reală — de aceea o semnalăm înainte de import, nu după.
+   */
+  const sameRangeOtherDevice = useMemo(() => {
+    if (!parsed) return null;
+    const dev = (parsed.device || "iPhone").trim().toLowerCase();
+    const clash = weeks.find(
+      (w) => w.from === parsed.from && w.to === parsed.to && w.device.trim().toLowerCase() !== dev,
+    );
+    return clash?.device ?? null;
+  }, [parsed, weeks]);
 
   const copyPrompt = async () => {
     try {
@@ -231,8 +273,45 @@ export default function Phone() {
 
   return (
     <main className="journal">
+      <div className="subtabs" role="tablist" aria-label="Secțiuni telefon">
+        <button
+          role="tab"
+          aria-selected={tab === "screentime"}
+          className={tab === "screentime" ? "active" : ""}
+          onClick={() => setTab("screentime")}
+        >
+          Screen Time
+        </button>
+        <button
+          role="tab"
+          aria-selected={tab === "import"}
+          className={tab === "import" ? "active" : ""}
+          onClick={() => setTab("import")}
+        >
+          Import
+        </button>
+      </div>
+
+      {tab === "screentime" ? (
+        <ScreenTime
+          report={phoneReport}
+          weeks={weeks}
+          mode={mode}
+          from={from}
+          to={to}
+          onMode={setMode}
+          onShift={shift}
+          onToday={() => setAnchor(new Date())}
+          showAll={showAllInReport}
+          onShowAll={setShowAllInReport}
+          onGoImport={() => setTab("import")}
+        />
+      ) : null}
+
+      {tab === "import" ? (
+      <>
       <section className="card">
-        <h2>Timp pe telefon</h2>
+        <h2>Cum aduci datele</h2>
         <p className="hint">
           iPhone-ul nu permite exportul datelor din Screen Time — nicio aplicație nu le poate
           scoate de pe telefon. Soluția: faci capturi de ecran, le dai unui asistent AI (orice
@@ -270,6 +349,16 @@ export default function Phone() {
         {parsed ? (
           <>
             <div className="reclass-title" style={{ marginTop: 14 }}>Verifică înainte de import</div>
+
+            {sameRangeOtherDevice ? (
+              <p className="warn-note">
+                Ai deja aceeași perioadă importată, dar sub alt nume de dispozitiv:{" "}
+                <b>„{sameRangeOtherDevice}"</b> față de <b>„{parsed.device || "iPhone"}"</b>. O
+                perioadă se suprascrie doar dacă numele coincide — altfel cele două se ADUNĂ, ca
+                și cum ai avea două telefoane. Dacă e același telefon, schimbă numele în JSON ca
+                să se potrivească, sau șterge perioada veche.
+              </p>
+            ) : null}
             <div className="phone-preview">
               <span><b>{parsed.from}</b> → <b>{parsed.to}</b></span>
               <span>total <b>{hm(parsed.totalMinutes)}</b></span>
@@ -411,6 +500,160 @@ export default function Phone() {
         </section>
       ) : null}
 
+      </>
+      ) : null}
+    </main>
+  );
+}
+
+/**
+ * Tot ce ține de telefon, într-un singur loc: cât, în ce clase, pe ce aplicații și ce
+ * perioade ai importat. Cifra principală pe clase e PROCENTUL, nu minutele — suma
+ * aplicațiilor din Screen Time nu e egală cu totalul afișat de Apple (pe date reale a
+ * ieșit și în plus, și în minus), așa că proporțiile sunt partea de încredere.
+ */
+function ScreenTime({
+  report, weeks, mode, from, to, onMode, onShift, onToday, showAll, onShowAll, onGoImport,
+}: {
+  report: Report | null;
+  weeks: PhoneWeek[];
+  mode: "week" | "month";
+  from: Date;
+  to: Date;
+  onMode: (m: "week" | "month") => void;
+  onShift: (dir: number) => void;
+  onToday: () => void;
+  showAll: boolean;
+  onShowAll: (v: boolean) => void;
+  onGoImport: () => void;
+}) {
+  const ph = report?.phone;
+  const has = (ph?.totalMinutes ?? 0) > 0;
+  const appsSum = ph?.appsSumMinutes ?? 0;
+  const pct = (minutes: number) => (appsSum > 0 ? Math.round((minutes / appsSum) * 100) : 0);
+  const days = Math.max(1, Math.round((to.getTime() - from.getTime()) / 86400000));
+  const apps = ph?.apps ?? [];
+  const shown = showAll ? apps : apps.slice(0, 10);
+
+  return (
+    <>
+      <div className="controls">
+        <div className="seg">
+          {(["week", "month"] as const).map((m) => (
+            <button key={m} className={mode === m ? "active" : ""} onClick={() => onMode(m)}>
+              {m === "week" ? "Săptămână" : "Lună"}
+            </button>
+          ))}
+        </div>
+        <div className="nav">
+          <button onClick={() => onShift(-1)} aria-label="Înapoi">←</button>
+          <span className="range-label">{rangeLabel(mode, from, to)}</span>
+          <button onClick={() => onShift(1)} aria-label="Înainte">→</button>
+          <button className="today" onClick={onToday}>Azi</button>
+        </div>
+      </div>
+
+      <section className="card">
+        <h2>Timp pe telefon</h2>
+        <p className="hint">
+          Din Screen Time, importat manual. Sunt totaluri raportate de Apple pe perioade
+          întregi, nu timp cronometrat — de aceea nu se adună la orele de pe calculator.{" "}
+          <a href="#devices">Vezi-le împreună</a>.
+        </p>
+
+        {!has ? (
+          <p className="empty">
+            Fără date în acest interval.{" "}
+            <button className="link-btn" onClick={onGoImport}>importă o perioadă</button>
+          </p>
+        ) : (
+          <>
+            <div className="dev-total">
+              <b>{fmtMin(ph!.totalMinutes)}</b>
+              <span className="range-label">
+                {fmtMin(Math.round(ph!.totalMinutes / days))} pe zi, în medie
+              </span>
+            </div>
+
+            <div className="phone-list" style={{ marginTop: 14 }}>
+              {(["productive", "neutral", "unproductive"] as ClassName[]).map((cls) => {
+                const v = ph!.byClass?.[cls] ?? 0;
+                if (v <= 0) return null;
+                return (
+                  <div className="phone-list-row" key={cls}>
+                    <span>
+                      <i className="swatch-inline" style={{ background: CLASS_VAR[cls] }} aria-hidden="true" />
+                      {CLASS_LABEL[cls]}
+                    </span>
+                    <span className="val">
+                      <b>{pct(v)}%</b>
+                      <span className="meta">{fmtMin(v)} după cifrele Apple</span>
+                    </span>
+                  </div>
+                );
+              })}
+              {ph!.unclassifiedMinutes > 0 ? (
+                <div className="phone-list-row">
+                  <span className="range-label">
+                    neclasificat
+                    <span className="meta">
+                      <button className="link-btn" onClick={onGoImport}>clasifică-le</button>
+                    </span>
+                  </span>
+                  <span className="val">
+                    <b>{pct(ph!.unclassifiedMinutes)}%</b>
+                    <span className="meta">{fmtMin(ph!.unclassifiedMinutes)} după cifrele Apple</span>
+                  </span>
+                </div>
+              ) : null}
+            </div>
+
+            {Object.keys(ph!.byProject).length > 0 ? (
+              <>
+                <div className="reclass-title" style={{ marginTop: 16 }}>Pe proiecte</div>
+                <div className="phone-list">
+                  {Object.entries(ph!.byProject).map(([name, minutes]) => (
+                    <div className="phone-list-row" key={name}>
+                      <span>{name}</span>
+                      <span className="val">{fmtMin(minutes)}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : null}
+
+            {apps.length > 0 ? (
+              <>
+                <div className="reclass-title" style={{ marginTop: 16 }}>Aplicații și site-uri</div>
+                <div className="phone-list">
+                  {shown.map((a) => (
+                    <div className="phone-list-row" key={a.name}>
+                      <span>{a.name}</span>
+                      <span className="val">{fmtMin(a.minutes)}</span>
+                    </div>
+                  ))}
+                  {apps.length > 10 ? (
+                    <button className="link-btn" onClick={() => onShowAll(!showAll)}>
+                      {showAll ? "arată mai puțin" : `…și încă ${apps.length - 10} — arată-le`}
+                    </button>
+                  ) : null}
+                </div>
+              </>
+            ) : null}
+
+            {appsSum !== ph!.totalMinutes ? (
+              <p className="hint" style={{ marginTop: 12 }}>
+                Cifrele Apple nu se închid între ele: aplicațiile adună {fmtMin(appsSum)}, iar
+                totalul afișat e {fmtMin(ph!.totalMinutes)}. Diferența nu are un sens constant —
+                pe date reale a ieșit și în plus, și în minus — așa că nu o „reparăm": totalul
+                rămâne cifra Apple, aplicațiile rămân exact cum le dă Apple, iar procentele de
+                mai sus sunt partea în care poți avea încredere.
+              </p>
+            ) : null}
+          </>
+        )}
+      </section>
+
       <section className="card">
         <h2>Perioade importate</h2>
         {weeks.length === 0 ? (
@@ -427,7 +670,7 @@ export default function Phone() {
                   </span>
                 </span>
                 <span className="val">
-                  {hm(w.totalMinutes)} · {hm(w.avgDailyMinutes)}/zi
+                  {fmtMin(w.totalMinutes)} · {fmtMin(w.avgDailyMinutes)}/zi
                   {w.apps?.length ? ` · ${w.apps.length} aplicații` : ""}
                 </span>
               </div>
@@ -435,11 +678,9 @@ export default function Phone() {
           </div>
         )}
         <p className="hint" style={{ marginTop: 10 }}>
-          Timpul de pe telefon se ține separat de cel măsurat pe calculator și nu se adună la el:
-          unul e cronometrat la secundă, celălalt e un total raportat de Apple. Retrimiterea
-          aceleiași perioade o corectează, nu o dublează.
+          Retrimiterea aceleiași perioade o corectează, nu o dublează.
         </p>
       </section>
-    </main>
+    </>
   );
 }

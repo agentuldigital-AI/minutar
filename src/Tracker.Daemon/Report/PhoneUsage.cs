@@ -40,8 +40,14 @@ public static class PhoneUsage
             var toStr = Str(e.Data, "to");
             if (!DateOnly.TryParse(fromStr, out var wFrom) || !DateOnly.TryParse(toStr, out var wTo)) continue;
 
-            // suprapunere cu intervalul cerut (o zi comună e de ajuns)
-            if (wTo.ToDateTime(TimeOnly.MinValue) < from.Date || wFrom.ToDateTime(TimeOnly.MinValue) > to.Date) continue;
+            // Suprapunere cu intervalul cerut. AMBELE capete sunt EXCLUSIVE: „Jul 13–20"
+            // înseamnă zilele 13..19 (7 bare în graficul Apple, media = total/7), iar `to`
+            // al raportului e tot exclusiv (săptămâna 6–12 iul = [07-06, 07-13)). Cu
+            // comparații inclusive, o perioadă atinsă doar la margine apărea și în
+            // săptămâna dinainte, și în cea de după — aceleași 23h 20m în trei săptămâni.
+            var wFromDt = wFrom.ToDateTime(TimeOnly.MinValue);
+            var wToDt = wTo.ToDateTime(TimeOnly.MinValue);
+            if (wFromDt >= to.Date || wToDt <= from.Date) continue;
 
             var apps = new List<(string, int)>();
             if (e.Data.TryGetProperty("apps", out var appsEl) && appsEl.ValueKind == JsonValueKind.Array)

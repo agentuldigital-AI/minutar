@@ -204,6 +204,8 @@ export default function Phone() {
   const [phoneReport, setPhoneReport] = useState<Report | null>(null);
   const [showAllInReport, setShowAllInReport] = useState(false);
   const [ruleBusy, setRuleBusy] = useState("");
+  /** Reguli aplicate în interfață, dar neconfirmate încă de server. */
+  const [optimistic, setOptimistic] = useState<Record<string, { cls: string; project: string }>>({});
 
   const [from, to] = useMemo(() => computeRange(mode, anchor), [mode, anchor]);
 
@@ -226,14 +228,27 @@ export default function Phone() {
    */
   const applyRule = async (name: string, cls: string, project: string) => {
     setRuleBusy(name);
+    // Arătăm schimbarea PE LOC, înainte de confirmarea serverului: recalcularea raportului
+    // durează secunde bune pe o lună, iar până acum singurul semn că s-a întâmplat ceva era
+    // că două butoane deveneau inactive. Utilizatorul a raportat, pe bună dreptate, că „nu
+    // se întâmplă nimic". Dacă salvarea eșuează, revenim și spunem de ce.
+    setOptimistic((o) => ({ ...o, [name]: { cls, project } }));
     try {
       await classifyPhoneApps([{ name, class: cls, project }]);
       const [r, unc] = await Promise.all([fetchReport(from, to), fetchUnclassifiedPhoneApps()]);
       setPhoneReport(r);
       setPending(unc);
       setError("");
+      setOptimistic((o) => {
+        const { [name]: _, ...rest } = o;
+        return rest;
+      });
     } catch (e) {
-      setError(String(e instanceof Error ? e.message : e));
+      setOptimistic((o) => {
+        const { [name]: _, ...rest } = o;
+        return rest;
+      });
+      setError(`Nu am putut salva „${name}": ${e instanceof Error ? e.message : e}`);
     } finally {
       setRuleBusy("");
     }
@@ -394,6 +409,8 @@ export default function Phone() {
           projects={pending.projects}
           onRule={applyRule}
           busy={ruleBusy}
+          optimistic={optimistic}
+          error={error}
         />
       ) : null}
 
@@ -651,7 +668,7 @@ export default function Phone() {
  */
 function ScreenTime({
   report, weeks, mode, from, to, onMode, onShift, onToday, showAll, onShowAll, onGoImport,
-  projects, onRule, busy,
+  projects, onRule, busy, optimistic, error,
 }: {
   report: Report | null;
   weeks: PhoneWeek[];
@@ -667,6 +684,8 @@ function ScreenTime({
   projects: string[];
   onRule: (name: string, cls: string, project: string) => void | Promise<void>;
   busy: string;
+  optimistic: Record<string, { cls: string; project: string }>;
+  error: string;
 }) {
   // cardul apăsat filtrează listele de dedesubt, exact ca pe Dashboard; null = toate
   const [filter, setFilter] = useState<ClassName | "none" | null>(null);
@@ -677,7 +696,12 @@ function ScreenTime({
   const days = Math.max(1, Math.round((to.getTime() - from.getTime()) / 86400000));
   // ridicările vin per perioadă importată, nu agregat — le însumăm pe cele din interval
   const pickups = (ph?.periods ?? []).reduce((sum, p) => sum + (p.pickups ?? 0), 0);
-  const apps = ph?.apps ?? [];
+  // ce a apăsat utilizatorul bate ce a apucat să răspundă serverul, până se confirmă
+  const apps = (ph?.apps ?? []).map((a) =>
+    optimistic[a.name]
+      ? { ...a, cls: optimistic[a.name].cls, project: optimistic[a.name].project || null }
+      : a,
+  );
 
   // Screen Time amestecă site-urile printre aplicații („stiri.example" lângă „WhatsApp");
   // le separăm ca pe calculator, unde Aplicații și Domenii sunt liste distincte
@@ -705,6 +729,8 @@ function ScreenTime({
           <button className="today" onClick={onToday}>Azi</button>
         </div>
       </div>
+
+      {error ? <p className="error">{error}</p> : null}
 
       <section className="card">
         <h2>Timp pe telefon</h2>
@@ -883,8 +909,9 @@ function PhoneEditor({ title, rows, total, projects, onRule, busy, showAll, onSh
         <div className="barlist">
           {shown.map((a) => {
             const cls = (a.cls as ClassName | undefined) ?? null;
+            const saving = busy === a.name;
             return (
-              <div className="row reclass-row phone-row" key={a.name}>
+              <div className={`row reclass-row phone-row${saving ? " saving" : ""}`} key={a.name}>
                 <span className="name" title={a.name}>
                   {cls ? (
                     <span className="dot" style={{ background: CLASS_VAR[cls] }} />
@@ -903,7 +930,9 @@ function PhoneEditor({ title, rows, total, projects, onRule, busy, showAll, onSh
                     }}
                   />
                 </span>
-                <span className="val">{fmtMin(a.minutes)}</span>
+                <span className="val">
+                  {saving ? <span className="saving-tag">se salvează…</span> : fmtMin(a.minutes)}
+                </span>
                 <span className="mini-btns">
                   {classes
                     .filter((c) => c !== cls)

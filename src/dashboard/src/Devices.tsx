@@ -65,7 +65,7 @@ export default function Devices() {
       phonePct: Math.round(shareOf(ph?.byClass?.[cls] ?? 0) * 100),
     }));
 
-    // în listele Screen Time site-urile stau lângă aplicații („mediafax.ro" lângă
+    // în listele Screen Time site-urile stau lângă aplicații („stiri.example" lângă
     // „WhatsApp"); le separăm ca să nu amestecăm două clasamente diferite
     const isSite = (name: string) => name.includes(".") && !name.includes(" ");
     const merge = (pc: NamedSeconds[], phone: { name: string; minutes: number }[]) => {

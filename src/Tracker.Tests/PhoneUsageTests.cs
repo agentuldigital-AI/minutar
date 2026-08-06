@@ -126,7 +126,7 @@ public sealed class PhoneUsageTests : IDisposable
     [InlineData("9GAG: Best LOL Pics & GIFs", "9GAG")]
     [InlineData("9GAG", "9GAG")]
     [InlineData("Yahoo Mail", "Yahoo Mail")]
-    [InlineData("mediafax.ro", "mediafax.ro")]
+    [InlineData("stiri.example", "stiri.example")]
     [InlineData("reportaproblem.apple.com", "reportaproblem.apple.com")]
     [InlineData("Bolt - Request a ride", "Bolt")]
     [InlineData("  Safari  ", "Safari")]

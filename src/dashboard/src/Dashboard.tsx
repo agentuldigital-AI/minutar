@@ -1383,7 +1383,7 @@ function ReclassList({
               <label>Folder Claude (claude_dirs) — opțional</label>
               <input
                 value={adoptDir}
-                placeholder="ex. C:\Users\…\yt-cowork"
+                placeholder="ex. C:\Users\…\proiectul-meu"
                 onChange={(e) => setAdoptDir(e.target.value)}
               />
               <div className="hint">

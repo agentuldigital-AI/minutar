@@ -728,16 +728,6 @@ function ScreenTime({
               </span>
             </div>
 
-            {pickups > 0 ? (
-              <p className="hint" style={{ marginTop: 8 }}>
-                <b>{pickups}</b> ridicări ale telefonului —{" "}
-                <b>{Math.round(pickups / days)}</b> pe zi, adică una la{" "}
-                <b>~{Math.round((16 * 60) / Math.max(1, pickups / days))} min</b> de veghe.
-                Cifra asta spune cât de <i>des</i>, nu cât de <i>mult</i>: același total de ore
-                fărâmițat în mai multe reprize e altă zi.
-              </p>
-            ) : null}
-
             <div className="tiles phone-tiles">
               {([
                 [null, "Tot timpul", ph!.totalMinutes, null],
@@ -764,6 +754,11 @@ function ScreenTime({
                       {key === null
                         ? `${fmtMin(Math.round(min / days))} pe zi, în medie`
                         : `${fmtMin(min)} după cifrele Apple`}
+                    </div>
+                    <div className="tile-action">
+                      {filter === key
+                        ? (key === null ? "toate activitățile" : "✓ filtru activ — click ca să-l scoți")
+                        : (key === null ? "click: arată tot" : "click: vezi doar astea")}
                     </div>
                   </button>
                 ))}

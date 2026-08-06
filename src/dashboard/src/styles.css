@@ -617,3 +617,9 @@ footer { margin-top: 30px; font-size: 12px; color: var(--text-secondary); displa
   border: 1px solid color-mix(in srgb, var(--bar-claude) 45%, var(--border));
   border-radius: 10px;
 }
+
+/* Lista de capturi din pasul 2 al importului: sub-puncte intr-un <ol>, cu ceva aer
+   intre ele — sunt trei actiuni distincte pe telefon, nu o insiruire. */
+.shot-list { margin: 6px 0 0; padding-left: 18px; }
+.shot-list li { margin-bottom: 5px; }
+.shot-list li:last-child { margin-bottom: 0; }

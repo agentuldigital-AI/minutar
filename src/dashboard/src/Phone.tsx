@@ -30,13 +30,22 @@ Citește-le și răspunde DOAR cu un JSON valid, fără text în jur, în format
 }
 
 Reguli:
-- "from" și "to" = intervalul afișat în capturi, în format yyyy-MM-dd.
+- "from" și "to" = intervalul afișat în capturi, în format yyyy-MM-dd. Apple scrie capătul
+  EXCLUSIV: „Jul 13–20" înseamnă from 2026-07-13, to 2026-07-20 (adică zilele 13..19).
 - "totalMinutes" = Total Screen Time al intervalului, convertit în minute (ex. 20h 0m = 1200).
 - "apps" = fiecare aplicație din lista Most Used, cu timpul convertit în minute (ex. 5h 0m = 300, 45m = 45).
 - Include toate aplicațiile vizibile, în ordinea din listă.
-- "pickups" și "notifications" = totalurile, dacă apar în capturi; altfel omite-le.
+- "name" = numele SCURT al aplicației. Taie sufixul descriptiv de după „:" sau „-" — scrie
+  „9GAG", nu „9GAG: Best LOL Pics & GIFs". Numele trebuie să fie identic de la o săptămână
+  la alta, altfel aceeași aplicație ajunge socotită de două ori.
+- "pickups" = DOAR numărul scris explicit „Total Pickups". Dacă vezi doar o medie pe zi,
+  omite complet câmpul.
+- "notifications" = la fel: doar dacă apare un TOTAL scris. Ecranul de Notifications arată
+  de obicei doar media pe zi — în cazul ăla omite câmpul.
+- NU calcula și NU deduce nimic: media × 7 nu e un total. Mai bine lipsește un câmp decât
+  să conțină o cifră pe care nu ai citit-o.
 - Dacă o captură continuă lista din precedenta, contopește-le fără să repeți aplicații.
-- Nu inventa valori: dacă o cifră nu se vede clar, omite aplicația respectivă.`;
+- Dacă o cifră nu se vede clar, omite intrarea respectivă.`;
 
 
 /** Propuneri pentru nume larg cunoscute. Sunt doar preselecții: utilizatorul poate
@@ -320,7 +329,33 @@ export default function Phone() {
         </p>
 
         <ol className="suggest-steps">
-          <li>Pe telefon: <b>Setări → Screen Time → See All App &amp; Website Activity</b>. Fă 2-3 capturi, derulând lista de aplicații.</li>
+          <li>
+            Pe telefon: <b>Setări → Screen Time → See All App &amp; Website Activity</b>, cu
+            comutatorul pe <b>Week</b>.
+          </li>
+          <li>
+            Fă capturi la, în ordine:
+            <ul className="shot-list">
+              <li>
+                <b>ecranul de sus</b> — trebuie să se vadă intervalul („Jul 20–27") și{" "}
+                <b>Total Screen Time</b>;
+              </li>
+              <li>
+                <b>lista Most Used</b>, derulată până la capăt. Apasă <b>Show More</b> și
+                continuă: aplicațiile de sub el chiar contează la total;
+              </li>
+              <li>
+                <b>secțiunea Pickups</b> — ai nevoie de rândul <b>Total Pickups</b>. Ăsta
+                spune de câte ori ai luat telefonul în mână, nu cât ai stat pe el: 3 ore în
+                două sesiuni și 3 ore în optzeci sunt zile complet diferite.
+              </li>
+            </ul>
+          </li>
+          <li>
+            <b>Notifications nu-ți trebuie.</b> Ecranul ăla arată doar media pe zi, nu un
+            total, iar un asistent AI e tentat s-o înmulțească cu 7 și să ți-o dea ca și cum
+            ar fi citit-o. Sari peste el.
+          </li>
           <li>Apasă <b>Copiază promptul</b> mai jos și lipește-l în ChatGPT, Claude sau Gemini, împreună cu capturile.</li>
           <li>Copiază răspunsul primit și lipește-l în câmpul de mai jos.</li>
           <li>Verifică previzualizarea și apasă <b>Importă</b>.</li>
@@ -532,6 +567,8 @@ function ScreenTime({
   const appsSum = ph?.appsSumMinutes ?? 0;
   const pct = (minutes: number) => (appsSum > 0 ? Math.round((minutes / appsSum) * 100) : 0);
   const days = Math.max(1, Math.round((to.getTime() - from.getTime()) / 86400000));
+  // ridicările vin per perioadă importată, nu agregat — le însumăm pe cele din interval
+  const pickups = (ph?.periods ?? []).reduce((sum, p) => sum + (p.pickups ?? 0), 0);
   const apps = ph?.apps ?? [];
   const shown = showAll ? apps : apps.slice(0, 10);
 
@@ -574,6 +611,16 @@ function ScreenTime({
                 {fmtMin(Math.round(ph!.totalMinutes / days))} pe zi, în medie
               </span>
             </div>
+
+            {pickups > 0 ? (
+              <p className="hint" style={{ marginTop: 8 }}>
+                <b>{pickups}</b> ridicări ale telefonului —{" "}
+                <b>{Math.round(pickups / days)}</b> pe zi, adică una la{" "}
+                <b>~{Math.round((16 * 60) / Math.max(1, pickups / days))} min</b> de veghe.
+                Cifra asta spune cât de <i>des</i>, nu cât de <i>mult</i>: același total de ore
+                fărâmițat în mai multe reprize e altă zi.
+              </p>
+            ) : null}
 
             <div className="phone-list" style={{ marginTop: 14 }}>
               {(["productive", "neutral", "unproductive"] as ClassName[]).map((cls) => {

@@ -4,6 +4,7 @@ import {
   type PhoneApp, type PhoneWeek, type Report, type UnclassifiedPhone,
 } from "./api";
 import { CLASS_LABEL, CLASS_VAR, computeRange, fmtMin, rangeLabel, type ClassName } from "./shared";
+import { RangeLabel, staleClass } from "./ui";
 
 /**
  * Import pentru timpul de pe telefon. iOS nu are export de Screen Time — datele
@@ -203,6 +204,7 @@ export default function Phone() {
   const [anchor, setAnchor] = useState(() => new Date());
   const [phoneReport, setPhoneReport] = useState<Report | null>(null);
   const [showAllInReport, setShowAllInReport] = useState(false);
+  const [busy, setBusy] = useState(true);
   const [ruleBusy, setRuleBusy] = useState("");
   /** Reguli aplicate în interfață, dar neconfirmate încă de server. */
   const [optimistic, setOptimistic] = useState<Record<string, { cls: string; project: string; kind: string }>>({});
@@ -212,9 +214,11 @@ export default function Phone() {
   useEffect(() => {
     if (tab !== "screentime") return;
     let alive = true;
+    setBusy(true);
     fetchReport(from, to)
       .then((r) => alive && setPhoneReport(r))
-      .catch(() => alive && setPhoneReport(null));
+      .catch(() => alive && setPhoneReport(null))
+      .finally(() => alive && setBusy(false));
     return () => {
       alive = false;
     };
@@ -373,7 +377,7 @@ export default function Phone() {
   };
 
   return (
-    <main className="journal">
+    <main className={`journal ${staleClass(busy && tab === "screentime")}`}>
       <div className="subtabs" role="tablist" aria-label="Secțiuni telefon">
         <button
           role="tab"
@@ -406,6 +410,7 @@ export default function Phone() {
           showAll={showAllInReport}
           onShowAll={setShowAllInReport}
           onGoImport={() => setTab("import")}
+          busyRange={busy}
           projects={pending.projects}
           onRule={applyRule}
           busy={ruleBusy}
@@ -668,7 +673,7 @@ export default function Phone() {
  */
 function ScreenTime({
   report, weeks, mode, from, to, onMode, onShift, onToday, showAll, onShowAll, onGoImport,
-  projects, onRule, busy, optimistic, error,
+  projects, onRule, busy, optimistic, error, busyRange,
 }: {
   report: Report | null;
   weeks: PhoneWeek[];
@@ -681,6 +686,7 @@ function ScreenTime({
   showAll: boolean;
   onShowAll: (v: boolean) => void;
   onGoImport: () => void;
+  busyRange: boolean;
   projects: string[];
   onRule: (name: string, cls: string, project: string, kind?: string) => void | Promise<void>;
   busy: string;
@@ -737,7 +743,7 @@ function ScreenTime({
         </div>
         <div className="nav">
           <button onClick={() => onShift(-1)} aria-label="Înapoi">←</button>
-          <span className="range-label">{rangeLabel(mode, from, to)}</span>
+          <RangeLabel busy={busyRange} text={rangeLabel(mode, from, to)} />
           <button onClick={() => onShift(1)} aria-label="Înainte">→</button>
           <button className="today" onClick={onToday}>Azi</button>
         </div>

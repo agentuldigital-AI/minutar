@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { fetchWeekly, type NamedSeconds, type WeeklyData } from "./api";
+import { RangeLabel, staleClass } from "./ui";
 
 function fmt(s: number): string {
   if (s >= 3600) return `${Math.floor(s / 3600)}h ${Math.round((s % 3600) / 60)}m`;
@@ -26,14 +27,17 @@ export default function Weekly() {
   const [anchor, setAnchor] = useState(() => new Date());
   const [data, setData] = useState<WeeklyData | null>(null);
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState(true);
 
   useEffect(() => {
+    setBusy(true);
     fetchWeekly(anchor)
       .then((d) => {
         setData(d);
         setError("");
       })
-      .catch((e) => setError(String(e)));
+      .catch((e) => setError(String(e)))
+      .finally(() => setBusy(false));
   }, [anchor]);
 
   const cur = data?.current;
@@ -49,12 +53,12 @@ export default function Weekly() {
     : "";
 
   return (
-    <main>
+    <main className={staleClass(busy)}>
       <div className="controls">
         <h2 style={{ margin: 0, fontSize: 15 }}>Raport săptămânal</h2>
         <div className="nav">
           <button onClick={() => setAnchor(new Date(anchor.getTime() - 7 * 864e5))} aria-label="Înapoi">←</button>
-          <span className="range-label">{weekLabel}</span>
+          <RangeLabel busy={busy} text={weekLabel} />
           <button onClick={() => setAnchor(new Date(anchor.getTime() + 7 * 864e5))} aria-label="Înainte">→</button>
           <button className="today" onClick={() => setAnchor(new Date())}>Azi</button>
         </div>

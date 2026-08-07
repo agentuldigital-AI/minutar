@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { fetchDay, fetchJournal, saveDay, type DayState, type JournalData } from "./api";
+import { RangeLabel, staleClass } from "./ui";
 
 function fmt(s: number): string {
   if (s >= 3600) return `${Math.floor(s / 3600)}h ${Math.round((s % 3600) / 60)}m`;
@@ -52,15 +53,18 @@ export default function Journal() {
   const [anchor, setAnchor] = useState(() => new Date());
   const [journal, setJournal] = useState<JournalData | null>(null);
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState(true);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
+    setBusy(true);
     fetchJournal(anchor)
       .then((j) => {
         setJournal(j);
         setError("");
       })
-      .catch((e) => setError(String(e)));
+      .catch((e) => setError(String(e)))
+      .finally(() => setBusy(false));
   }, [anchor]);
 
   const lines = useMemo(() => (journal ? buildLines(journal) : []), [journal]);
@@ -77,12 +81,12 @@ export default function Journal() {
   const dayLabel = anchor.toLocaleDateString("ro-RO", { weekday: "short", day: "numeric", month: "long" });
 
   return (
-    <main>
+    <main className={staleClass(busy)}>
       <div className="controls">
         <h2 style={{ margin: 0, fontSize: 15 }}>Jurnalul zilei</h2>
         <div className="nav">
           <button onClick={() => setAnchor(new Date(anchor.getTime() - 864e5))} aria-label="Înapoi">←</button>
-          <span className="range-label">{dayLabel}</span>
+          <RangeLabel busy={busy} text={dayLabel} />
           <button onClick={() => setAnchor(new Date(anchor.getTime() + 864e5))} aria-label="Înainte">→</button>
           <button className="today" onClick={() => setAnchor(new Date())}>Azi</button>
         </div>

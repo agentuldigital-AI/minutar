@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { fetchReport, type NamedSeconds, type Report } from "./api";
 import { CLASS_LABEL, CLASS_VAR, computeRange, fmt, fmtMin, rangeLabel, type ClassName, type Mode } from "./shared";
+import { RangeLabel, staleClass } from "./ui";
 
 /**
  * Singurul loc unde calculatorul și telefonul se adună. Stă separat de Dashboard fiindcă
@@ -111,7 +112,7 @@ export default function Devices() {
   }, [report]);
 
   return (
-    <main>
+    <main className={staleClass(loading)}>
       <div className="controls">
         <div className="seg">
           {(["week", "month"] as const).map((m) => (
@@ -122,7 +123,7 @@ export default function Devices() {
         </div>
         <div className="nav">
           <button onClick={() => shift(-1)} aria-label="Înapoi">←</button>
-          <span className="range-label">{rangeLabel(mode, from, to)}</span>
+          <RangeLabel busy={loading} text={rangeLabel(mode, from, to)} />
           <button onClick={() => shift(1)} aria-label="Înainte">→</button>
           <button className="today" onClick={() => setAnchor(new Date())}>Azi</button>
         </div>

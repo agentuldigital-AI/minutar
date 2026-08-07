@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { assignClassForDay, assignMinutesForDay, assignToProject, assignToProjectForDay, createProject, fetchClaudeCwds, fetchConfig, fetchDay, fetchReport, focusStart, focusStop, reclassify, removeDayAssignment, saveConfig, saveDay, unassignFromProject, type ConfigData, type DayAssignment, type DayState, type HeatmapRow, type NamedSeconds, type Report } from "./api";
 import { CLASS_LABEL, CLASS_VAR, computeRange, fmt, fmtMin, rangeLabel, type ClassName, type Mode } from "./shared";
+import { RangeLabel, staleClass } from "./ui";
 
 /**
  * Bară cu procent „stil baterie": lungimea = ponderea în TOTALUL listei (nu în maxim),
@@ -75,15 +76,21 @@ export default function Dashboard() {
     fetchConfig().then(setCfgData).catch(() => setCfgData(null));
   }, []);
 
+  const [busy, setBusy] = useState(true);
   const [from, to] = useMemo(() => computeRange(mode, anchor), [mode, anchor]);
 
   const load = useCallback(() => {
+    // „busy" pornește la FIECARE cerere, nu doar la prima: raportul se recalculează de
+    // fiecare dată (o lună ia peste 10s pe date reale), iar până acum pagina arăta tăcut
+    // cifrele intervalului anterior — puteai crede că o săptămână e goală când nu era.
+    setBusy(true);
     fetchReport(from, to)
       .then((r) => {
         setReport(r);
         setError("");
       })
-      .catch((e) => setError(String(e)));
+      .catch((e) => setError(String(e)))
+      .finally(() => setBusy(false));
   }, [from, to]);
   // referință mereu-proaspătă pentru timeout-urile de refetch (1.5s): un closure vechi
   // ar reîncărca ziua VECHE peste cea curent afișată la navigare rapidă
@@ -231,7 +238,7 @@ export default function Dashboard() {
   }, [mode, timeline, from, to]);
 
   return (
-    <main>
+    <main className={staleClass(busy)}>
       <div className="controls">
         <div className="seg" role="tablist" aria-label="Interval">
           {(["day", "week", "month"] as Mode[]).map((m) => (
@@ -242,7 +249,7 @@ export default function Dashboard() {
         </div>
         <div className="nav">
           <button onClick={() => shift(-1)} aria-label="Înapoi">←</button>
-          <span className="range-label">{rangeLabel(mode, from, to)}</span>
+          <RangeLabel busy={busy} text={rangeLabel(mode, from, to)} />
           <button onClick={() => shift(1)} aria-label="Înainte">→</button>
           <button className="today" onClick={() => setAnchor(new Date())}>Azi</button>
         </div>

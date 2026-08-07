@@ -830,7 +830,7 @@ function ScreenTime({
               <p className="hint" style={{ marginTop: 10, marginBottom: 0 }}>
                 <b>Browsere:</b>{" "}
                 {browsers.map((b) => `${b.name} ${fmtMin(b.minutes)}`).join(", ")}. Orele
-                astea nu apar în cifrele de mai sus, pentru că sunt deja trecute la
+                acestea nu apar în cifrele de mai sus, pentru că sunt deja trecute la
                 site-urile pe care le-ai deschis. Dacă le-am număra și separat, aceleași ore
                 ar ieși de două ori.
               </p>

@@ -205,7 +205,7 @@ export default function Phone() {
   const [showAllInReport, setShowAllInReport] = useState(false);
   const [ruleBusy, setRuleBusy] = useState("");
   /** Reguli aplicate în interfață, dar neconfirmate încă de server. */
-  const [optimistic, setOptimistic] = useState<Record<string, { cls: string; project: string }>>({});
+  const [optimistic, setOptimistic] = useState<Record<string, { cls: string; project: string; kind: string }>>({});
 
   const [from, to] = useMemo(() => computeRange(mode, anchor), [mode, anchor]);
 
@@ -226,15 +226,15 @@ export default function Phone() {
    * pe săptămână, deci nu există „doar în ziua asta" ca pe calculator. Reîncărcăm imediat
    * raportul, fiindcă daemonul aplică schimbarea sincron la scriere.
    */
-  const applyRule = async (name: string, cls: string, project: string) => {
+  const applyRule = async (name: string, cls: string, project: string, kind = "") => {
     setRuleBusy(name);
     // Arătăm schimbarea PE LOC, înainte de confirmarea serverului: recalcularea raportului
     // durează secunde bune pe o lună, iar până acum singurul semn că s-a întâmplat ceva era
     // că două butoane deveneau inactive. Utilizatorul a raportat, pe bună dreptate, că „nu
     // se întâmplă nimic". Dacă salvarea eșuează, revenim și spunem de ce.
-    setOptimistic((o) => ({ ...o, [name]: { cls, project } }));
+    setOptimistic((o) => ({ ...o, [name]: { cls, project, kind } }));
     try {
-      await classifyPhoneApps([{ name, class: cls, project }]);
+      await classifyPhoneApps([{ name, class: cls, project, kind }]);
       const [r, unc] = await Promise.all([fetchReport(from, to), fetchUnclassifiedPhoneApps()]);
       setPhoneReport(r);
       setPending(unc);
@@ -682,9 +682,9 @@ function ScreenTime({
   onShowAll: (v: boolean) => void;
   onGoImport: () => void;
   projects: string[];
-  onRule: (name: string, cls: string, project: string) => void | Promise<void>;
+  onRule: (name: string, cls: string, project: string, kind?: string) => void | Promise<void>;
   busy: string;
-  optimistic: Record<string, { cls: string; project: string }>;
+  optimistic: Record<string, { cls: string; project: string; kind: string }>;
   error: string;
 }) {
   // cardul apăsat filtrează listele de dedesubt, exact ca pe Dashboard; null = toate
@@ -699,18 +699,26 @@ function ScreenTime({
   // ce a apăsat utilizatorul bate ce a apucat să răspundă serverul, până se confirmă
   const apps = (ph?.apps ?? []).map((a) =>
     optimistic[a.name]
-      ? { ...a, cls: optimistic[a.name].cls, project: optimistic[a.name].project || null }
+      ? {
+          ...a,
+          cls: optimistic[a.name].cls,
+          project: optimistic[a.name].project || null,
+          kind: optimistic[a.name].kind || a.kind,
+        }
       : a,
   );
 
-  // Screen Time amestecă site-urile printre aplicații („stiri.example" lângă „WhatsApp");
-  // le separăm ca pe calculator, unde Aplicații și Domenii sunt liste distincte
-  const isSite = (n: string) => n.includes(".") && !n.includes(" ");
+  // tipul vine de la server (regula explicită bate ghicitul), ca să nu avem două
+  // implementări ale aceleiași decizii
   const inClass = (a: { cls?: string | null }) =>
     filter === null ? true : filter === "none" ? !a.cls : a.cls === filter;
   const visible = apps.filter(inClass);
-  const appRows = visible.filter((a) => !isSite(a.name));
-  const siteRows = visible.filter((a) => isSite(a.name));
+  const appRows = visible.filter((a) => a.kind !== "site");
+  const siteRows = visible.filter((a) => a.kind === "site");
+  const browsers = ph?.browsers ?? [];
+  // ce rămâne din totalul Apple după ce scoatem tot ce e numit: aplicații sub pragul lui
+  // de afișare, plus timp de ecran care nu aparține niciunei aplicații
+  const unattributed = Math.max(0, (ph?.totalMinutes ?? 0) - appsSum);
 
   return (
     <>
@@ -789,6 +797,24 @@ function ScreenTime({
                   </button>
                 ))}
             </div>
+
+            {browsers.length > 0 || unattributed > 0 ? (
+              <p className="hint" style={{ marginTop: 10, marginBottom: 0 }}>
+                {browsers.length > 0 ? (
+                  <>
+                    {browsers.map((b) => `${b.name} ${fmtMin(b.minutes)}`).join(", ")} —{" "}
+                    <b>recipiente</b>, nu activități: timpul lor e deja detaliat de site-urile
+                    de mai jos, deci nu se numără a doua oară.{" "}
+                  </>
+                ) : null}
+                {unattributed > 0 ? (
+                  <>
+                    Din totalul Apple rămân <b>{fmtMin(unattributed)}</b> pe care el nu le
+                    detaliază — aplicații sub pragul lui de afișare.
+                  </>
+                ) : null}
+              </p>
+            ) : null}
 
             {pickups > 0 ? (
               <p className="hint" style={{ marginTop: 10, marginBottom: 0 }}>
@@ -888,10 +914,10 @@ function ScreenTime({
  */
 function PhoneEditor({ title, rows, total, projects, onRule, busy, showAll, onShowAll }: {
   title: string;
-  rows: { name: string; minutes: number; cls?: string | null; project?: string | null }[];
+  rows: { name: string; minutes: number; cls?: string | null; project?: string | null; kind?: string }[];
   total: number;
   projects: string[];
-  onRule: (name: string, cls: string, project: string) => void | Promise<void>;
+  onRule: (name: string, cls: string, project: string, kind?: string) => void | Promise<void>;
   busy: string;
   showAll: boolean;
   onShowAll: (v: boolean) => void;
@@ -946,6 +972,20 @@ function PhoneEditor({ title, rows, total, projects, onRule, busy, showAll, onSh
                       />
                     ))}
                 </span>
+                <button
+                  className="kind-btn"
+                  disabled={busy === a.name}
+                  title={
+                    a.kind === "site"
+                      ? `„${a.name}" e socotit site — click ca să-l muți la Aplicații`
+                      : `„${a.name}" e socotit aplicație — click ca să-l muți la Site-uri`
+                  }
+                  onClick={() =>
+                    void onRule(a.name, cls ?? "neutral", a.project ?? "", a.kind === "site" ? "app" : "site")
+                  }
+                >
+                  {a.kind === "site" ? "site" : "app"}
+                </button>
                 <select
                   className="proj-select"
                   value={a.project ?? ""}

@@ -169,4 +169,111 @@ public sealed class PhoneUsageTests : IDisposable
         Assert.Equal("9GAG", apps[0].GetProperty("name").GetString());
         Assert.Equal(100, apps[0].GetProperty("minutes").GetInt32());
     }
+
+    [Theory]
+    [InlineData("Safari", null, "browser")]
+    [InlineData("Brave", null, "browser")]
+    [InlineData("stiri.example", null, "site")]
+    [InlineData("WhatsApp", null, "app")]
+    [InlineData("9GAG", null, "app")]          // fara punct in nume, deci pare aplicatie...
+    [InlineData("9GAG", "site", "site")]       // ...pana cand utilizatorul spune altfel
+    [InlineData("Safari", "app", "app")]       // si un browser poate fi socotit activitate
+    public void KindOfRespectsTheExplicitRuleFirst(string name, string? kind, string expected)
+    {
+        Assert.Equal(expected, PhoneUsage.KindOf(name, kind));
+    }
+
+    [Fact]
+    public async Task ABrowserIsAContainer_NotAnActivity()
+    {
+        // Cazul real: Safari 709 min ≈ 9GAG 543 + site-uri 157. Numarat ca activitate, dubla
+        // toata navigarea SI o punea pe clasa browserului — 11h de „neutru" din care 9h erau
+        // de fapt neproductive.
+        await _store.HeartbeatAsync(
+            AwBuckets.PhoneUsage("HOST"),
+            new Dictionary<string, object?>
+            {
+                ["device"] = "iPhone", ["from"] = "2026-07-13", ["to"] = "2026-07-20",
+                ["totalMinutes"] = 800, ["source"] = "test", ["recordedAt"] = "2026-08-07T10:00:00+03:00",
+                ["apps"] = new[]
+                {
+                    new Dictionary<string, object?> { ["name"] = "Safari", ["minutes"] = 700 },
+                    new Dictionary<string, object?> { ["name"] = "9GAG", ["minutes"] = 543 },
+                    new Dictionary<string, object?> { ["name"] = "stiri.example", ["minutes"] = 157 },
+                },
+            },
+            pulsetimeSeconds: 0,
+            timestamp: new DateTimeOffset(2026, 7, 13, 0, 0, 0, TimeSpan.Zero));
+
+        var cfg = new Tracker.Shared.Config.TrackerConfig();
+        cfg.PhoneApps.Add(new Tracker.Shared.Config.PhoneAppConfig { Name = "Safari", Class = "neutral" });
+        cfg.PhoneApps.Add(new Tracker.Shared.Config.PhoneAppConfig { Name = "9GAG", Class = "unproductive" });
+        cfg.PhoneApps.Add(new Tracker.Shared.Config.PhoneAppConfig { Name = "stiri.example", Class = "unproductive" });
+
+        var json = System.Text.Json.JsonSerializer.Serialize(
+            PhoneUsage.Summarize(await ReadWeekAsync(13), cfg));
+        using var doc = System.Text.Json.JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        // Safari nu intra nici in clase, nici in clasament
+        Assert.Equal(700, root.GetProperty("browsers").EnumerateArray().Single().GetProperty("minutes").GetInt32());
+        Assert.Equal(700, root.GetProperty("appsSumMinutes").GetInt32());  // 543 + 157
+        Assert.Equal(700, root.GetProperty("byClass").GetProperty("unproductive").GetInt32());
+        Assert.False(root.GetProperty("byClass").TryGetProperty("neutral", out _));
+        Assert.DoesNotContain(
+            root.GetProperty("apps").EnumerateArray(),
+            a => a.GetProperty("name").GetString() == "Safari");
+    }
+
+    [Fact]
+    public async Task AUserCanForceABrowserToCountAsAnActivity()
+    {
+        await _store.HeartbeatAsync(
+            AwBuckets.PhoneUsage("HOST"),
+            new Dictionary<string, object?>
+            {
+                ["device"] = "iPhone", ["from"] = "2026-07-13", ["to"] = "2026-07-20",
+                ["totalMinutes"] = 100, ["source"] = "test", ["recordedAt"] = "2026-08-07T10:00:00+03:00",
+                ["apps"] = new[] { new Dictionary<string, object?> { ["name"] = "Safari", ["minutes"] = 60 } },
+            },
+            pulsetimeSeconds: 0,
+            timestamp: new DateTimeOffset(2026, 7, 13, 0, 0, 0, TimeSpan.Zero));
+
+        var cfg = new Tracker.Shared.Config.TrackerConfig();
+        cfg.PhoneApps.Add(new Tracker.Shared.Config.PhoneAppConfig
+        {
+            Name = "Safari", Class = "productive", Kind = "app",
+        });
+
+        var json = System.Text.Json.JsonSerializer.Serialize(
+            PhoneUsage.Summarize(await ReadWeekAsync(13), cfg));
+        using var doc = System.Text.Json.JsonDocument.Parse(json);
+
+        Assert.Empty(doc.RootElement.GetProperty("browsers").EnumerateArray());
+        Assert.Equal(60, doc.RootElement.GetProperty("byClass").GetProperty("productive").GetInt32());
+    }
+
+    [Fact]
+    public void KindRoundTripsThroughConfig()
+    {
+        var cfg = new Tracker.Shared.Config.TrackerConfig();
+        cfg.PhoneApps.Add(new Tracker.Shared.Config.PhoneAppConfig
+        {
+            Name = "9GAG", Class = "unproductive", Kind = "site",
+        });
+
+        var path = Path.Combine(Path.GetTempPath(), "tracker-tests", Path.GetRandomFileName() + ".toml");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        try
+        {
+            Tracker.Shared.Config.ConfigWriter.Write(cfg, path);
+            var loaded = Tracker.Shared.Config.TrackerConfig.Load(path);
+
+            Assert.Equal("site", loaded.PhoneApps.Single().Kind);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }

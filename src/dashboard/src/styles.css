@@ -695,9 +695,19 @@ footer { margin-top: 30px; font-size: 12px; color: var(--text-secondary); displa
 /* Randul de editare are aceleasi coloane ca pe Dashboard, dar mai stranse: pe telefon
    numele sunt scurte si nu exista sub-randuri de alocare. */
 .barlist .row.phone-row {
-  grid-template-columns: minmax(120px, 1fr) 90px 56px 46px 130px;
-  gap: 10px;
+  grid-template-columns: minmax(110px, 1fr) 76px 52px 44px 40px 120px;
+  gap: 8px;
 }
+/* Comutatorul app/site: Screen Time nu spune care e care, iar ghicitul dupa punct in nume
+   da gres tocmai la cazurile care conteaza (9GAG e navigare, dar se cheama „9GAG"). */
+.kind-btn {
+  font-size: 10px; font-family: inherit; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.03em; padding: 3px 0; width: 100%;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: var(--card); color: var(--text-secondary); cursor: pointer;
+}
+.kind-btn:hover { border-color: var(--accent); color: var(--accent); }
+.kind-btn:disabled { opacity: 0.4; cursor: default; }
 .phone-row .name { display: flex; align-items: center; min-width: 0; }
 .phone-row .name .dot { margin-right: 7px; }
 /* Pista era invizibila: .dev-col are fundal --card-2, aproape identic cu --track, iar

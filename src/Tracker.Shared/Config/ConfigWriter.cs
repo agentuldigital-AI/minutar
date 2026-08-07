@@ -198,6 +198,7 @@ public static class ConfigWriter
             sb.AppendLine($"name    = {Q(p.Name)}");
             sb.AppendLine($"class   = {Q(p.Class)}");
             if (p.Project.Length > 0) sb.AppendLine($"project = {Q(p.Project)}");
+            if (p.Kind.Length > 0) sb.AppendLine($"kind    = {Q(p.Kind)}");
         }
         return sb.ToString();
     }

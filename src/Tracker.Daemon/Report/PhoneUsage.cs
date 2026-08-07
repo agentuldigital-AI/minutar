@@ -97,6 +97,28 @@ public static class PhoneUsage
     }
 
     /// <summary>
+    /// Browserele de pe telefon, recunoscute din start ca RECIPIENTE. Utilizatorul le poate
+    /// contrazice punând <c>kind = "app"</c> pe una dintre ele.
+    /// </summary>
+    private static readonly HashSet<string> KnownBrowsers = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Safari", "Chrome", "Google Chrome", "Brave", "Firefox", "Edge", "Microsoft Edge",
+        "Opera", "DuckDuckGo", "Safari Technology Preview",
+    };
+
+    /// <summary>
+    /// Ce fel de intrare e: <c>app</c>, <c>site</c> sau <c>browser</c>. Regula explicită din
+    /// config bate întotdeauna ghicitul.
+    /// </summary>
+    public static string KindOf(string name, string? explicitKind)
+    {
+        if (!string.IsNullOrWhiteSpace(explicitKind)) return explicitKind.Trim().ToLowerInvariant();
+        if (KnownBrowsers.Contains(MatchKey(name))) return "browser";
+        // în listele Screen Time site-urile apar ca domenii goale („stiri.example"), fără spații
+        return name.Contains('.') && !name.Contains(' ') ? "site" : "app";
+    }
+
+    /// <summary>
     /// Totalurile pe clase și proiecte, după regulile din <c>[[phone_apps]]</c>. Aplicațiile
     /// fără clasă NU se pun pe „neutru" — sunt numărate separat, ca utilizatorul să vadă cât
     /// din timp e încă neclasificat în loc să creadă că e neutru.
@@ -111,6 +133,7 @@ public static class PhoneUsage
         var byClass = new Dictionary<string, int>(StringComparer.Ordinal);
         var byProject = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var byApp = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var browsers = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var unclassified = 0;
 
         foreach (var w in weeks)
@@ -122,8 +145,21 @@ public static class PhoneUsage
                 // importuri, „9GAG" și „9GAG: Best LOL Pics & GIFs" sunt aceeași aplicație și
                 // ar fi ieșit două rânduri care se împart timpul între ele
                 var key = MatchKey(name);
+                rules.TryGetValue(key, out var rule);
+
+                // Un browser e RECIPIENT, nu activitate: timpul lui e deja detaliat de
+                // site-urile din el, care apar ca intrări separate în aceeași listă. Dacă
+                // l-am număra, am dubla toată navigarea și am pune-o pe clasa browserului
+                // — exact ce se întâmpla cu 11h de „Safari · neutru", din care 9h erau 9GAG.
+                if (KindOf(name, rule?.Kind) == "browser")
+                {
+                    browsers[key] = browsers.GetValueOrDefault(key) + minutes;
+                    continue;
+                }
+
                 byApp[key] = byApp.GetValueOrDefault(key) + minutes;
-                if (rules.TryGetValue(key, out var rule))
+
+                if (rule is not null)
                 {
                     byClass[rule.Class] = byClass.GetValueOrDefault(rule.Class) + minutes;
                     if (rule.Project.Length > 0)
@@ -157,8 +193,13 @@ public static class PhoneUsage
                     minutes = kv.Value,
                     cls = r?.Class,
                     project = r is { Project.Length: > 0 } ? r.Project : null,
+                    kind = KindOf(kv.Key, r?.Kind),
                 };
             }),
+            // recipientele, separat: timpul lor NU intră în clase, dar utilizatorul trebuie
+            // să vadă că există și cât acoperă, altfel pare că am pierdut ore
+            browsers = browsers.OrderByDescending(kv => kv.Value)
+                .Select(kv => new { name = kv.Key, minutes = kv.Value }),
             // Apple raportează un total mai mic decât suma aplicațiilor (site-urile se
             // numără și în browser, iar „Total Screen Time" se calculează altfel). Îl
             // expunem ca să poată fi arătat, nu ascuns ca o eroare de-a noastră.

@@ -67,7 +67,9 @@ export interface PhoneSummary {
   byClass: Record<string, number>;
   byProject: Record<string, number>;
   unclassifiedMinutes: number;
-  apps: { name: string; minutes: number; cls?: string | null; project?: string | null }[];
+  apps: { name: string; minutes: number; cls?: string | null; project?: string | null; kind?: string }[];
+  /** Browsere: recipiente, nu activități — timpul lor nu intră în clase. */
+  browsers?: { name: string; minutes: number }[];
   appsSumMinutes: number;
   periods: {
     device: string;
@@ -499,7 +501,7 @@ export async function fetchUnclassifiedPhoneApps(): Promise<UnclassifiedPhone> {
 }
 
 export async function classifyPhoneApps(
-  apps: { name: string; class: string; project?: string }[],
+  apps: { name: string; class: string; project?: string; kind?: string }[],
 ): Promise<void> {
   const resp = await fetch("/api/phone/classify", {
     method: "POST",

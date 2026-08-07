@@ -91,6 +91,8 @@ public sealed class TrackerConfig
             Require(p.Name.Trim().Length > 0, "phone_apps.name nu poate fi gol");
             Require(p.Class is "productive" or "neutral" or "unproductive",
                 $"phone_apps.class invalid pentru „{p.Name}”: {p.Class}");
+            Require(p.Kind is "" or "app" or "site" or "browser",
+                $"phone_apps.kind invalid pentru „{p.Name}”: {p.Kind}");
         }
         Require(Popup.SureCooldownMinutes >= 1, "popup.sure_cooldown_minutes must be >= 1");
         Require(Attribution.HoldSeconds >= 0, "attribution.hold_seconds must be >= 0");
@@ -214,6 +216,19 @@ public sealed class PhoneAppConfig
 
     /// <summary>Opțional: timpul acelei aplicații se atribuie unui proiect.</summary>
     public string Project { get; set; } = "";
+
+    /// <summary>
+    /// Ce fel de intrare e: <c>app</c>, <c>site</c> sau <c>browser</c>. Gol = ghicim
+    /// (are punct și n-are spațiu ⇒ site; nume de browser cunoscut ⇒ browser).
+    ///
+    /// <c>browser</c> înseamnă RECIPIENT, nu activitate: Screen Time raportează Safari și
+    /// site-urile din el ca intrări separate în aceeași listă, deși timpul e același. Pe
+    /// datele reale, Safari = suma copiilor lui la 8–20 min pe săptămână. Numărat ca
+    /// activitate, dubla tot ce ai navigat și punea totul pe clasa browserului. E aceeași
+    /// regulă ca pe calculator, unde o fereastră de browser se clasifică după site, nu
+    /// după chrome.exe.
+    /// </summary>
+    public string Kind { get; set; } = "";
 }
 
 public sealed class ProjectConfig

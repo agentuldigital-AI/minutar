@@ -292,6 +292,8 @@ app.MapPost("/api/phone/classify", (PhoneClassifyDto req) =>
     {
         if (a.Class is not ("productive" or "neutral" or "unproductive"))
             return Results.BadRequest(new { error = $"clasă invalidă pentru „{a.Name}”: {a.Class}" });
+        if (a.Kind is not (null or "" or "app" or "site" or "browser"))
+            return Results.BadRequest(new { error = $"tip invalid pentru „{a.Name}”: {a.Kind}" });
     }
 
     // ADITIV, ca /api/projects: nu cere token de versiune și nu poate șterge munca altcuiva
@@ -318,6 +320,7 @@ app.MapPost("/api/phone/classify", (PhoneClassifyDto req) =>
                 Name = name,
                 Class = a.Class,
                 Project = a.Project?.Trim() ?? "",
+                Kind = a.Kind?.Trim().ToLowerInvariant() ?? "",
             });
         }
 
@@ -927,7 +930,7 @@ internal sealed record ConfigUpdate(
 internal sealed record DayAssignDto(
     string Date, string Match, string Value, string? Project = null, string? Class = null,
     string? From = null, string? To = null);
-internal sealed record PhoneAppRuleDto(string Name, string Class, string? Project = null);
+internal sealed record PhoneAppRuleDto(string Name, string Class, string? Project = null, string? Kind = null);
 internal sealed record PhoneClassifyDto(List<PhoneAppRuleDto>? Apps);
 internal sealed record PhoneAppUsageDto(string Name, int Minutes);
 internal sealed record PhoneUsageDto(

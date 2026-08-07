@@ -314,13 +314,19 @@ app.MapPost("/api/phone/classify", (PhoneClassifyDto req) =>
         foreach (var a in items)
         {
             var name = a.Name.Trim();
+            // ACTUALIZARE PARȚIALĂ: un câmp lipsă înseamnă „lasă-l cum e", nu „golește-l".
+            // Altfel orice buton care nu trimite tot răspunsul șterge restul — exact ce s-a
+            // întâmplat cu tipul: apăsai o clasă și aplicația sărea înapoi din Site-uri în
+            // Aplicații, fiindcă butonul de clasă nu avea de unde ști ce tip era.
+            var old = fresh.PhoneApps.FirstOrDefault(
+                p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
             fresh.PhoneApps.RemoveAll(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
             fresh.PhoneApps.Add(new PhoneAppConfig
             {
                 Name = name,
                 Class = a.Class,
-                Project = a.Project?.Trim() ?? "",
-                Kind = a.Kind?.Trim().ToLowerInvariant() ?? "",
+                Project = a.Project?.Trim() ?? old?.Project ?? "",
+                Kind = string.IsNullOrWhiteSpace(a.Kind) ? old?.Kind ?? "" : a.Kind.Trim().ToLowerInvariant(),
             });
         }
 

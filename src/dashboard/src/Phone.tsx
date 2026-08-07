@@ -968,7 +968,7 @@ function PhoneEditor({ title, rows, total, projects, onRule, busy, showAll, onSh
                         disabled={busy === a.name}
                         title={`Mută „${a.name}" în ${CLASS_LABEL[c]} — în toate perioadele`}
                         style={{ background: CLASS_VAR[c] }}
-                        onClick={() => void onRule(a.name, c, a.project ?? "")}
+                        onClick={() => void onRule(a.name, c, a.project ?? "", a.kind)}
                       />
                     ))}
                 </span>
@@ -995,7 +995,7 @@ function PhoneEditor({ title, rows, total, projects, onRule, busy, showAll, onSh
                   value={a.project ?? ""}
                   disabled={busy === a.name}
                   title="Pune timpul acestei aplicații pe un proiect"
-                  onChange={(e) => void onRule(a.name, cls ?? "neutral", e.target.value)}
+                  onChange={(e) => void onRule(a.name, cls ?? "neutral", e.target.value, a.kind)}
                 >
                   <option value="">— fără proiect —</option>
                   {projects.map((p) => (

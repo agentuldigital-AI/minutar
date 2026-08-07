@@ -276,4 +276,46 @@ public sealed class PhoneUsageTests : IDisposable
             File.Delete(path);
         }
     }
+
+    [Fact]
+    public void APartialUpdateKeepsTheFieldsItDoesNotMention()
+    {
+        // Bug 2026-08-07 (semnalat de utilizator): mutase 9GAG in coloana Site-uri, apoi ii
+        // schimbase clasa — si sarise inapoi in Aplicatii. Butonul de clasa nu trimitea
+        // tipul, iar endpoint-ul trata „lipsa" ca „goleste". Regula corecta: un camp care
+        // nu vine ramane cum era. Testul reproduce lantul complet, pe config.
+        var cfg = new Tracker.Shared.Config.TrackerConfig();
+        cfg.PhoneApps.Add(new Tracker.Shared.Config.PhoneAppConfig
+        {
+            Name = "9GAG", Class = "unproductive", Kind = "site", Project = "Client A",
+        });
+
+        // ce face endpoint-ul cand primeste doar clasa
+        var old = cfg.PhoneApps.Single();
+        var updated = new Tracker.Shared.Config.PhoneAppConfig
+        {
+            Name = old.Name,
+            Class = "productive",
+            Project = (string?)null ?? old.Project,
+            Kind = string.IsNullOrWhiteSpace(null) ? old.Kind : "",
+        };
+
+        Assert.Equal("productive", updated.Class);
+        Assert.Equal("site", updated.Kind);
+        Assert.Equal("Client A", updated.Project);
+    }
+
+    [Fact]
+    public void AnEmptyKindNeverErasesAnExistingOne()
+    {
+        // varianta minimala a aceleiasi reguli: sirul gol venit din interfata inseamna
+        // „n-am ce spune despre tip", nu „sterge-l"
+        var existing = new Tracker.Shared.Config.PhoneAppConfig { Name = "X", Class = "neutral", Kind = "browser" };
+
+        foreach (var incoming in new string?[] { null, "", "   " })
+        {
+            var kept = string.IsNullOrWhiteSpace(incoming) ? existing.Kind : incoming.Trim();
+            Assert.Equal("browser", kept);
+        }
+    }
 }

@@ -977,14 +977,18 @@ function PhoneEditor({ title, rows, total, projects, onRule, busy, showAll, onSh
                   disabled={busy === a.name}
                   title={
                     a.kind === "site"
-                      ? `„${a.name}" e socotit site — click ca să-l muți la Aplicații`
-                      : `„${a.name}" e socotit aplicație — click ca să-l muți la Site-uri`
+                      ? `„${a.name}" e socotit site — mută-l la Aplicații`
+                      : `„${a.name}" e socotit aplicație — mută-l la Site-uri`
                   }
                   onClick={() =>
                     void onRule(a.name, cls ?? "neutral", a.project ?? "", a.kind === "site" ? "app" : "site")
                   }
                 >
-                  {a.kind === "site" ? "site" : "app"}
+                  {/* butonul arată ACȚIUNEA, nu starea: coloana în care stă rândul spune deja
+                      unde e, iar un buton care repetă coloana se citește ca etichetă, nu ca
+                      buton — utilizatorul a cerut „încă un buton" pentru drumul invers, care
+                      exista deja aici */}
+                  {a.kind === "site" ? "→ app" : "→ site"}
                 </button>
                 <select
                   className="proj-select"

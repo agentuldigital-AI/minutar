@@ -701,8 +701,8 @@ footer { margin-top: 30px; font-size: 12px; color: var(--text-secondary); displa
 /* Comutatorul app/site: Screen Time nu spune care e care, iar ghicitul dupa punct in nume
    da gres tocmai la cazurile care conteaza (9GAG e navigare, dar se cheama „9GAG"). */
 .kind-btn {
-  font-size: 10px; font-family: inherit; font-weight: 700; text-transform: uppercase;
-  letter-spacing: 0.03em; padding: 3px 0; width: 100%;
+  font-size: 10px; font-family: inherit; font-weight: 700; text-transform: lowercase;
+  letter-spacing: 0.02em; padding: 3px 0; width: 100%; white-space: nowrap;
   border: 1px solid var(--border); border-radius: 6px;
   background: var(--card); color: var(--text-secondary); cursor: pointer;
 }

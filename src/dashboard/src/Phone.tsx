@@ -722,6 +722,8 @@ function ScreenTime({
   // ce rămâne din totalul Apple după ce scoatem tot ce e numit: aplicații sub pragul lui
   // de afișare, plus timp de ecran care nu aparține niciunei aplicații
   const unattributed = Math.max(0, (ph?.totalMinutes ?? 0) - appsSum);
+  /** Câte secunde din gol revin unei ridicări — cifra care arată de ce e gol acolo. */
+  const gapPerPickup = pickups > 0 ? Math.round((unattributed * 60) / pickups) : 0;
 
   return (
     <>
@@ -772,9 +774,15 @@ function ScreenTime({
                 ["neutral", CLASS_LABEL.neutral, ph!.byClass?.neutral ?? 0, CLASS_VAR.neutral, "neutre"],
                 ["unproductive", CLASS_LABEL.unproductive, ph!.byClass?.unproductive ?? 0, CLASS_VAR.unproductive, "neproductive"],
                 ["none", "Neclasificat", ph!.unclassifiedMinutes, null, "neclasificate"],
-                // „Nedetaliat" nu e o clasă și n-are rânduri de filtrat — dar TREBUIE să fie
-                // acolo: fără el, cardurile de clasă nu adună niciodată totalul de sus, iar
-                // cifrele par pur și simplu greșite (semnalat de utilizator).
+                // Diferența dintre totalul Apple și activitățile numite. TREBUIE să fie
+                // acolo: fără ea, cardurile de clasă nu adună niciodată totalul de sus.
+                //
+                // Am crezut întâi că sunt aplicații tăiate de „Show More". Nu sunt: golul e
+                // aproape identic pe trei săptămâni cu liste de 23, 31 și 37 de aplicații
+                // (252, 256, 251 min), dar raportat la ridicări dă 26,6s / 24,1s / 26,8s —
+                // adică se scalează cu de câte ori pui mâna pe telefon, nu cu câte aplicații
+                // ai folosit. E timpul dintre aplicații: ecran blocat, ecran principal,
+                // notificări. Coada tăiată si navigarea nedetaliată explică 40-55 min din el.
                 ["gap", "Nedetaliat", unattributed, null, ""],
               ] as [ClassName | "none" | "gap" | null, string, number, string | null, string][])
                 .filter(([key, , min]) => (key !== "none" && key !== "gap") || min > 0)
@@ -801,12 +809,14 @@ function ScreenTime({
                         {key === null
                           ? `${fmtMin(Math.round(min / days))} pe zi, în medie`
                           : key === "gap"
-                            ? `${fmtMin(min)} pe care Apple nu le detaliază`
+                            ? `${fmtMin(min)} în afara oricărei aplicații`
                             : `${fmtMin(min)} conform cifrelor de la Apple`}
                       </div>
                       <div className="tile-action">
                         {key === "gap"
-                          ? "aplicații sub pragul lui de afișare"
+                          ? gapPerPickup > 0
+                            ? `ecran blocat, ecran principal, notificări — ~${gapPerPickup}s la fiecare ridicare`
+                            : "ecran blocat, ecran principal, notificări"
                           : selected
                             ? (key === null ? "toate activitățile" : "✓ filtru activ — click ca să-l scoți")
                             : (key === null ? "click: arată tot" : `click: vezi doar activitățile ${plural}`)}

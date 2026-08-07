@@ -828,14 +828,11 @@ function ScreenTime({
 
             {browsers.length > 0 ? (
               <p className="hint" style={{ marginTop: 10, marginBottom: 0 }}>
-                {browsers.length > 0 ? (
-                  <>
-                    {browsers.map((b) => `${b.name} ${fmtMin(b.minutes)}`).join(", ")} —{" "}
-                    <b>recipiente</b>, nu activități: timpul lor e deja detaliat de site-urile
-                    de mai jos, deci nu se numără a doua oară.{" "}
-                  </>
-                ) : null}
-
+                <b>Browsere:</b>{" "}
+                {browsers.map((b) => `${b.name} ${fmtMin(b.minutes)}`).join(", ")}. Orele
+                astea nu apar în cifrele de mai sus, pentru că sunt deja trecute la
+                site-urile pe care le-ai deschis. Dacă le-am număra și separat, aceleași ore
+                ar ieși de două ori.
               </p>
             ) : null}
 
@@ -884,13 +881,15 @@ function ScreenTime({
               />
             </div>
 
-            {appsSum !== ph!.totalMinutes ? (
+            {/* Cât timp activitățile stau SUB total, diferența e deja explicată de cardul
+                „Nedetaliat" — a repeta aici ar încurca. Nota rămâne doar pentru cazul care
+                chiar nu se explică singur: activități care adună mai mult decât întregul. */}
+            {appsSum > ph!.totalMinutes ? (
               <p className="hint" style={{ marginTop: 12 }}>
-                Cifrele Apple nu se închid între ele: aplicațiile adună {fmtMin(appsSum)}, iar
-                totalul afișat e {fmtMin(ph!.totalMinutes)}. Diferența nu are un sens constant —
-                pe date reale a ieșit și în plus, și în minus — așa că nu o „reparăm": totalul
-                rămâne cifra Apple, aplicațiile rămân exact cum le dă Apple, iar procentele de
-                mai sus sunt partea în care poți avea încredere.
+                Activitățile de mai jos adună {fmtMin(appsSum)} — mai mult decât cele{" "}
+                {fmtMin(ph!.totalMinutes)} pe care le arată telefonul. Se întâmplă când o
+                aplicație le conține pe altele: un browser socotit ca activitate, deși
+                orele lui sunt deja trecute la site-urile deschise în el.
               </p>
             ) : null}
           </>

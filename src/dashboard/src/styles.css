@@ -681,6 +681,9 @@ footer { margin-top: 30px; font-size: 12px; color: var(--text-secondary); displa
 }
 .phone-tiles .tile:hover .tile-action { color: var(--accent); }
 .phone-tiles .tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* „Nedetaliat" e informatie, nu filtru: nu are randuri de aratat, deci nu se apasa. */
+.phone-tiles .tile.static { cursor: default; opacity: 0.85; }
+.phone-tiles .tile.static:hover { transform: none; border-color: var(--border); box-shadow: var(--shadow); }
 .phone-tiles .tile.selected {
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 7%, var(--card));

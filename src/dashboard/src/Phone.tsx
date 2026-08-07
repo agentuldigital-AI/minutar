@@ -693,6 +693,9 @@ function ScreenTime({
   const has = (ph?.totalMinutes ?? 0) > 0;
   const appsSum = ph?.appsSumMinutes ?? 0;
   const pct = (minutes: number) => (appsSum > 0 ? Math.round((minutes / appsSum) * 100) : 0);
+  /** Procent din totalul raportat de Apple — singurul numitor folosit pe carduri. */
+  const totalPct = (minutes: number) =>
+    (ph?.totalMinutes ?? 0) > 0 ? Math.round((minutes / ph!.totalMinutes) * 100) : 0;
   const days = Math.max(1, Math.round((to.getTime() - from.getTime()) / 86400000));
   // ridicările vin per perioadă importată, nu agregat — le însumăm pe cele din interval
   const pickups = (ph?.periods ?? []).reduce((sum, p) => sum + (p.pickups ?? 0), 0);
@@ -764,41 +767,56 @@ function ScreenTime({
 
             <div className="tiles phone-tiles">
               {([
-                [null, "Tot timpul", ph!.totalMinutes, null],
-                ["productive", CLASS_LABEL.productive, ph!.byClass?.productive ?? 0, CLASS_VAR.productive],
-                ["neutral", CLASS_LABEL.neutral, ph!.byClass?.neutral ?? 0, CLASS_VAR.neutral],
-                ["unproductive", CLASS_LABEL.unproductive, ph!.byClass?.unproductive ?? 0, CLASS_VAR.unproductive],
-                ["none", "Neclasificat", ph!.unclassifiedMinutes, null],
-              ] as [ClassName | "none" | null, string, number, string | null][])
-                .filter(([key, , min]) => key !== "none" || min > 0)
-                .map(([key, label, min, color]) => (
-                  <button
-                    key={label}
-                    className={`tile clickable${filter === key ? " selected" : ""}${filter !== null && filter !== key ? " dim" : ""}`}
-                    onClick={() => setFilter(filter === key ? null : key)}
-                  >
-                    <div className="label">
-                      {color ? <span className="dot" style={{ background: color }} /> : null}
-                      {label}
-                    </div>
-                    <div className="value">
-                      {key === null ? fmtMin(min) : `${pct(min)}%`}
-                    </div>
-                    <div className="sub">
-                      {key === null
-                        ? `${fmtMin(Math.round(min / days))} pe zi, în medie`
-                        : `${fmtMin(min)} după cifrele Apple`}
-                    </div>
-                    <div className="tile-action">
-                      {filter === key
-                        ? (key === null ? "toate activitățile" : "✓ filtru activ — click ca să-l scoți")
-                        : (key === null ? "click: arată tot" : "click: vezi doar astea")}
-                    </div>
-                  </button>
-                ))}
+                [null, "Tot timpul", ph!.totalMinutes, null, ""],
+                ["productive", CLASS_LABEL.productive, ph!.byClass?.productive ?? 0, CLASS_VAR.productive, "productive"],
+                ["neutral", CLASS_LABEL.neutral, ph!.byClass?.neutral ?? 0, CLASS_VAR.neutral, "neutre"],
+                ["unproductive", CLASS_LABEL.unproductive, ph!.byClass?.unproductive ?? 0, CLASS_VAR.unproductive, "neproductive"],
+                ["none", "Neclasificat", ph!.unclassifiedMinutes, null, "neclasificate"],
+                // „Nedetaliat" nu e o clasă și n-are rânduri de filtrat — dar TREBUIE să fie
+                // acolo: fără el, cardurile de clasă nu adună niciodată totalul de sus, iar
+                // cifrele par pur și simplu greșite (semnalat de utilizator).
+                ["gap", "Nedetaliat", unattributed, null, ""],
+              ] as [ClassName | "none" | "gap" | null, string, number, string | null, string][])
+                .filter(([key, , min]) => (key !== "none" && key !== "gap") || min > 0)
+                .map(([key, label, min, color, plural]) => {
+                  const clickable = key !== "gap";
+                  const selected = filter === key;
+                  return (
+                    <button
+                      key={label}
+                      disabled={!clickable}
+                      className={`tile${clickable ? " clickable" : " static"}${selected ? " selected" : ""}${filter !== null && filter !== key ? " dim" : ""}`}
+                      onClick={() => clickable && setFilter(selected ? null : (key as ClassName | "none" | null))}
+                    >
+                      <div className="label">
+                        {color ? <span className="dot" style={{ background: color }} /> : null}
+                        {label}
+                      </div>
+                      {/* toate procentele se raportează la ACELAȘI numitor — totalul Apple —
+                          ca părțile să adune întregul afișat pe primul card */}
+                      <div className="value">
+                        {key === null ? fmtMin(min) : `${totalPct(min)}%`}
+                      </div>
+                      <div className="sub">
+                        {key === null
+                          ? `${fmtMin(Math.round(min / days))} pe zi, în medie`
+                          : key === "gap"
+                            ? `${fmtMin(min)} pe care Apple nu le detaliază`
+                            : `${fmtMin(min)} conform cifrelor de la Apple`}
+                      </div>
+                      <div className="tile-action">
+                        {key === "gap"
+                          ? "aplicații sub pragul lui de afișare"
+                          : selected
+                            ? (key === null ? "toate activitățile" : "✓ filtru activ — click ca să-l scoți")
+                            : (key === null ? "click: arată tot" : `click: vezi doar activitățile ${plural}`)}
+                      </div>
+                    </button>
+                  );
+                })}
             </div>
 
-            {browsers.length > 0 || unattributed > 0 ? (
+            {browsers.length > 0 ? (
               <p className="hint" style={{ marginTop: 10, marginBottom: 0 }}>
                 {browsers.length > 0 ? (
                   <>
@@ -807,12 +825,7 @@ function ScreenTime({
                     de mai jos, deci nu se numără a doua oară.{" "}
                   </>
                 ) : null}
-                {unattributed > 0 ? (
-                  <>
-                    Din totalul Apple rămân <b>{fmtMin(unattributed)}</b> pe care el nu le
-                    detaliază — aplicații sub pragul lui de afișare.
-                  </>
-                ) : null}
+
               </p>
             ) : null}
 

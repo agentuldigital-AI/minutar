@@ -129,9 +129,10 @@ public class BriefingComposerTests
         IReadOnlyList<TopItem>? topProd = null, IReadOnlyList<TopItem>? topUnp = null,
         bool phoneMissing = false,
         double phProd = 0, double phNeu = 0, double phUnp = 0, double phUncl = 0,
-        IReadOnlyList<TopItem>? phTopProd = null, IReadOnlyList<TopItem>? phTopUnp = null) =>
+        IReadOnlyList<TopItem>? phTopProd = null, IReadOnlyList<TopItem>? phTopUnp = null,
+        double meetSec = 0, int meetCount = 0) =>
         new(kind, DateOnly.Parse(from, CultureInfo.InvariantCulture), DateOnly.Parse(to, CultureInfo.InvariantCulture),
-            active, prod, neutral, unprod, phoneMin, topProd, topUnp,
+            active, prod, neutral, unprod, phoneMin, topProd, topUnp, meetSec, meetCount,
             phProd, phNeu, phUnp, phUncl, phTopProd, phTopUnp, compare, phoneMissing);
 
     [Theory]
@@ -299,6 +300,34 @@ public class BriefingComposerTests
         var text = BriefingComposer.Compose(Data(topProd: null, topUnp: null));
 
         Assert.DoesNotContain("Top activități", text);
+    }
+
+    [Fact]
+    public void SedinteleApar_DoarPeSaptamanaSiLuna()
+    {
+        // pe zi stii oricum ca ai avut o sedinta; intrebarea utila e una de perioada
+        Assert.DoesNotContain("Ședințe", BriefingComposer.Compose(
+            Data(active: 4 * 3600, meetSec: 3600, meetCount: 2)));
+
+        var w = BriefingComposer.Compose(
+            Data(kind: BriefingPeriod.Week, active: 4 * 3600, meetSec: 3600, meetCount: 2));
+        Assert.Contains("Ședințe 1h 00m (2 ședințe) · 25% din timpul pe calculator", w);
+    }
+
+    [Fact]
+    public void OSinguraSedinta_ScrieLaSingular()
+    {
+        var text = BriefingComposer.Compose(
+            Data(kind: BriefingPeriod.Month, active: 10 * 3600, meetSec: 3600, meetCount: 1));
+
+        Assert.Contains("(1 ședință)", text);
+    }
+
+    [Fact]
+    public void FaraSedinte_NuApareRandul()
+    {
+        Assert.DoesNotContain("Ședințe", BriefingComposer.Compose(
+            Data(kind: BriefingPeriod.Week, meetSec: 0, meetCount: 0)));
     }
 
     [Fact]

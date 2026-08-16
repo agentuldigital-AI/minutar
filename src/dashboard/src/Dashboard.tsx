@@ -55,6 +55,14 @@ interface Tooltip {
 }
 
 /** Cheia calendaristică locală (yyyy-MM-dd) a unei date. */
+/** „09:16" — ora locala a unui instant ISO. Duplicat local, ca in Journal.tsx. */
+const hm = (iso: string) =>
+  new Date(iso).toLocaleTimeString("ro-RO", { hour: "2-digit", minute: "2-digit" });
+
+/** „sâm" — pe saptamana si luna, o ora fara zi ar fi ambigua. */
+const dayShort = (iso: string) =>
+  new Date(iso).toLocaleDateString("ro-RO", { weekday: "short" });
+
 const localDayKey = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
@@ -698,6 +706,67 @@ export default function Dashboard() {
             onTip={setTooltip}
           />
         </div>
+      )}
+
+      {report?.meetings && (
+        <section className="card">
+          <h2>Ședințe</h2>
+          <p className="hint">
+            timp în apel, inclusiv ce ai făcut în alte ferestre cât ținea ședința · e o etichetă
+            peste timpul deja măsurat, nu se adaugă la total
+          </p>
+          <div className="barlist">
+            <div className="row">
+              <span className="name">În aplicația de apel</span>
+              <TrackBar
+                seconds={report.meetings.inAppSeconds}
+                denom={report.meetings.seconds}
+                color="var(--bar-window)"
+                suffix="din timpul de ședință"
+              />
+              <span className="val">{fmt(report.meetings.inAppSeconds)}</span>
+            </div>
+            <div className="row">
+              <span className="name">În alte ferestre</span>
+              <TrackBar
+                seconds={report.meetings.elsewhereSeconds}
+                denom={report.meetings.seconds}
+                color="var(--bar-window)"
+                opacity={0.45}
+                suffix="din timpul de ședință"
+              />
+              <span className="val">{fmt(report.meetings.elsewhereSeconds)}</span>
+            </div>
+          </div>
+          <div className="legend">
+            <span>
+              <b>{fmt(report.meetings.seconds)}</b> în {report.meetings.count}{" "}
+              {report.meetings.count === 1 ? "ședință" : "ședințe"}
+              {active > 0 ? ` · ${Math.round((report.meetings.seconds / active) * 100)}% din timpul activ` : ""}
+            </span>
+          </div>
+          <p className="hint" style={{ margin: "14px 0 6px" }}>
+            fiecare ședință, de la început la sfârșit — suma lor e mai mare decât totalul de sus,
+            care numără doar timpul măsurat efectiv, fără pauzele neproductive
+          </p>
+          <div className="barlist">
+            {report.meetings.blocks.map((b) => (
+              <div className="row" key={b.start}>
+                <span className="name">
+                  {mode === "day" ? hm(b.start) : `${dayShort(b.start)} ${hm(b.start)}`}–{hm(b.end)}
+                </span>
+                <TrackBar
+                  seconds={b.seconds}
+                  denom={Math.max(...report.meetings!.blocks.map((x) => x.seconds))}
+                  color="var(--bar-window)"
+                  opacity={0.7}
+                  suffix="față de cea mai lungă ședință"
+                />
+                <span className="val">{fmt(b.seconds)}</span>
+              </div>
+            ))}
+          </div>
+        </section>
       )}
 
       <div className="columns">

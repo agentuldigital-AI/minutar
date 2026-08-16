@@ -30,6 +30,9 @@ public sealed record BriefingData(
     double PhoneMinutes,
     IReadOnlyList<TopItem>? TopProductive = null,
     IReadOnlyList<TopItem>? TopUnproductive = null,
+    /// <summary>Timp în ședințe video — etichetă peste timpul de calculator, nu în plus față de el.</summary>
+    double MeetingSeconds = 0,
+    int MeetingCount = 0,
     double PhoneProductiveMinutes = 0,
     double PhoneNeutralMinutes = 0,
     double PhoneUnproductiveMinutes = 0,
@@ -106,6 +109,14 @@ public static class BriefingComposer
             phTopUnp = PhoneTop(ph, "unproductive");
         }
 
+        double meetSec = 0;
+        var meetCount = 0;
+        if (root.TryGetProperty("meetings", out var mt) && mt.ValueKind == JsonValueKind.Object)
+        {
+            meetSec = Num(mt, "seconds");
+            meetCount = (int)Num(mt, "count");
+        }
+
         var compare = 0d;
         if (compareReport is not null && compareDivisor > 0)
         {
@@ -121,7 +132,7 @@ public static class BriefingComposer
             byClass is { } ? Num(byClass.Value, "neutral") : 0,
             byClass is { } ? Num(byClass.Value, "unproductive") : 0,
             phone,
-            PcTop(root, "productive"), PcTop(root, "unproductive"),
+            PcTop(root, "productive"), PcTop(root, "unproductive"), meetSec, meetCount,
             phProd, phNeu, phUnp, phUncl, phTopProd, phTopUnp,
             compare, phoneMissing);
     }
@@ -203,6 +214,17 @@ public static class BriefingComposer
             Line(sb, "Productiv", d.ProductiveSeconds, d.ActiveSeconds);
             Line(sb, "Neutru", d.NeutralSeconds, d.ActiveSeconds);
             Line(sb, "Neproductiv", d.UnproductiveSeconds, d.ActiveSeconds);
+
+            // Ședințele apar doar pe săptămână și lună: pe zi știi oricum că ai avut o ședință,
+            // iar întrebarea utilă („cât din săptămână s-a dus în ședințe") e una de perioadă.
+            if (d.Kind is BriefingPeriod.Week or BriefingPeriod.Month
+                && d.MeetingSeconds >= 60 && d.ActiveSeconds > 0)
+            {
+                sb.Append("\nȘedințe ").Append(Dur(d.MeetingSeconds))
+                  .Append(" (").Append(d.MeetingCount).Append(d.MeetingCount == 1 ? " ședință)" : " ședințe)")
+                  .Append(" · ").Append((int)Math.Round(d.MeetingSeconds / d.ActiveSeconds * 100))
+                  .Append("% din timpul pe calculator");
+            }
 
             Top(sb, "Top activități productive", d.TopProductive);
             Top(sb, "Top activități neproductive", d.TopUnproductive);

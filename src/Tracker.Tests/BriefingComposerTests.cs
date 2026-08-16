@@ -118,9 +118,12 @@ public class BriefingComposerTests
         double prod = 4 * 3600, double neutral = 3600, double unprod = 72 * 60,
         double phoneMin = 0, double compare = 0,
         IReadOnlyList<(string, double)>? apps = null,
-        bool phoneMissing = false) =>
+        bool phoneMissing = false,
+        double phProd = 0, double phNeu = 0, double phUnp = 0, double phUncl = 0,
+        IReadOnlyList<(string, double)>? phoneApps = null) =>
         new(kind, DateOnly.Parse(from, CultureInfo.InvariantCulture), DateOnly.Parse(to, CultureInfo.InvariantCulture),
-            active, prod, neutral, unprod, phoneMin, apps ?? Array.Empty<(string, double)>(), compare, phoneMissing);
+            active, prod, neutral, unprod, phoneMin, apps ?? Array.Empty<(string, double)>(),
+            phProd, phNeu, phUnp, phUncl, phoneApps, compare, phoneMissing);
 
     [Theory]
     [InlineData(0, "0m")]
@@ -178,14 +181,43 @@ public class BriefingComposerTests
         // 2h PC + 1h telefon: cifra care conteaza cu adevarat e suma, nu fiecare separat
         var text = BriefingComposer.Compose(Data(active: 2 * 3600, phoneMin: 60));
 
-        Assert.Contains("Telefon 1h 00m", text);
-        Assert.Contains("împreună <b>3h 00m</b>", text);
+        Assert.Contains("<b>Telefon 1h 00m</b>", text);
+        Assert.Contains("<b>Împreună 3h 00m</b>", text);
     }
 
     [Fact]
     public void FaraDateDeTelefon_NuInventeazaTotalulComun()
     {
-        Assert.DoesNotContain("împreună", BriefingComposer.Compose(Data(phoneMin: 0)));
+        Assert.DoesNotContain("Împreună", BriefingComposer.Compose(Data(phoneMin: 0)));
+    }
+
+    [Fact]
+    public void TelefonulAreDefalcareaSiTopulLui_NuDoarUnTotal()
+    {
+        // un telefon poate fi 47% neproductiv in timp ce calculatorul e 74% productiv;
+        // o singura medie ar ascunde exact partea care conteaza
+        var text = BriefingComposer.Compose(Data(
+            active: 2 * 3600, phoneMin: 600,
+            phProd: 60, phNeu: 120, phUnp: 300, phUncl: 120,
+            phoneApps: new[] { ("MemeBox", 300d), ("Harta", 120d) }));
+
+        Assert.Contains("<b>Calculator 2h 00m</b>", text);
+        Assert.Contains("<b>Telefon 10h 00m</b>", text);
+        Assert.Contains("Neproductiv 5h 00m (50%)", text);   // raportat la totalul TELEFONULUI
+        Assert.Contains("Nedetaliat 2h 00m (20%)", text);
+        Assert.Contains("MemeBox 5h 00m", text);
+        Assert.Contains("<b>Împreună 12h 00m</b>", text);
+    }
+
+    [Fact]
+    public void GolulDeTelefon_SeCalculeazaSiCandClaseleNuAcoperaTotalul()
+    {
+        // Apple da un total mai mare decat suma aplicatiilor numite; fara linia „Nedetaliat"
+        // procentele par sa nu se inchida si ai crede ca lipseste ceva din raport
+        var text = BriefingComposer.Compose(Data(
+            active: 3600, phoneMin: 100, phProd: 10, phNeu: 10, phUnp: 20, phUncl: 0));
+
+        Assert.Contains("Nedetaliat 1h 00m (60%)", text);
     }
 
     [Fact]

@@ -26,6 +26,12 @@ public sealed record BriefingData(
     double UnproductiveSeconds,
     double PhoneMinutes,
     IReadOnlyList<(string Name, double Seconds)> TopApps,
+    double PhoneProductiveMinutes = 0,
+    double PhoneNeutralMinutes = 0,
+    double PhoneUnproductiveMinutes = 0,
+    /// <summary>Diferența dintre totalul Apple și suma aplicațiilor numite — vezi pagina Telefon.</summary>
+    double PhoneUnclassifiedMinutes = 0,
+    IReadOnlyList<(string Name, double Minutes)>? PhoneTopApps = null,
     /// <summary>Media zilnică anterioară (zi) sau totalul perioadei dinainte (săptămână/lună). 0 = se omite.</summary>
     double CompareSeconds = 0,
     /// <summary>Nu există date de telefon pentru interval — se cere un import, nu se tace.</summary>
@@ -73,6 +79,8 @@ public static class BriefingComposer
 
         var phone = 0d;
         var phoneMissing = true;
+        double phProd = 0, phNeu = 0, phUnp = 0, phUncl = 0;
+        var phoneApps = new List<(string, double)>();
         if (root.TryGetProperty("phone", out var ph) && ph.ValueKind == JsonValueKind.Object)
         {
             phone = Num(ph, "totalMinutes");
@@ -80,6 +88,22 @@ public static class BriefingComposer
             phoneMissing = !(ph.TryGetProperty("periods", out var per)
                              && per.ValueKind == JsonValueKind.Array
                              && per.GetArrayLength() > 0);
+            phUncl = Num(ph, "unclassifiedMinutes");
+            if (Obj(ph, "byClass") is { } pbc)
+            {
+                phProd = Num(pbc, "productive");
+                phNeu = Num(pbc, "neutral");
+                phUnp = Num(pbc, "unproductive");
+            }
+            if (ph.TryGetProperty("apps", out var pa) && pa.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var a in pa.EnumerateArray().Take(3))
+                {
+                    var n = Str(a, "name");
+                    var m = Num(a, "minutes");
+                    if (n.Length > 0 && m > 0) phoneApps.Add((n, m));
+                }
+            }
         }
 
         var compare = 0d;
@@ -96,7 +120,7 @@ public static class BriefingComposer
             byClass is { } ? Num(byClass.Value, "productive") : 0,
             byClass is { } ? Num(byClass.Value, "neutral") : 0,
             byClass is { } ? Num(byClass.Value, "unproductive") : 0,
-            phone, apps, compare, phoneMissing);
+            phone, apps, phProd, phNeu, phUnp, phUncl, phoneApps, compare, phoneMissing);
     }
 
     /// <summary>Mesajul propriu-zis. HTML (parse_mode), cu tot ce vine din date escapat.</summary>
@@ -116,13 +140,16 @@ public static class BriefingComposer
             return sb.ToString() + PhoneHint(d);
         }
 
+        // Un bloc per dispozitiv. „Activ" singur era ambiguu: nu spunea dacă include și telefonul.
+        // Fiecare bloc își are propria defalcare, pentru că un telefon poate fi 47% neproductiv
+        // în timp ce calculatorul e 74% productiv — o singură medie ar ascunde exact asta.
         if (nimicPePc)
         {
             sb.Append("\n\nPe calculator, nimic înregistrat.");
         }
         else
         {
-            sb.Append("\n\nActiv <b>").Append(Dur(d.ActiveSeconds)).Append("</b>");
+            sb.Append("\n\n<b>Calculator ").Append(Dur(d.ActiveSeconds)).Append("</b>");
             if (d.CompareSeconds >= 60)
                 sb.Append(" — ").Append(CompareLabel(d.Kind)).Append(": ").Append(Dur(d.CompareSeconds));
 
@@ -131,18 +158,40 @@ public static class BriefingComposer
             Add(clase, "Neutru", d.NeutralSeconds, d.ActiveSeconds);
             Add(clase, "Neproductiv", d.UnproductiveSeconds, d.ActiveSeconds);
             if (clase.Count > 0) sb.Append('\n').Append(string.Join(" · ", clase));
+
+            if (d.TopApps.Count > 0)
+                sb.Append("\nTop: ")
+                  .Append(string.Join(" · ", d.TopApps.Select(a => $"{Esc(a.Name)} {Dur(a.Seconds)}")));
         }
 
         if (!nimicPeTelefon)
         {
-            sb.Append("\nTelefon ").Append(Dur(d.PhoneMinutes * 60));
-            if (!nimicPePc)
-                sb.Append(" · împreună <b>").Append(Dur(d.ActiveSeconds + d.PhoneMinutes * 60)).Append("</b>");
-        }
+            var tot = d.PhoneMinutes;
+            sb.Append("\n\n<b>Telefon ").Append(Dur(tot * 60)).Append("</b>");
 
-        if (d.TopApps.Count > 0)
-            sb.Append("\n\nTop: ")
-              .Append(string.Join(" · ", d.TopApps.Select(a => $"{Esc(a.Name)} {Dur(a.Seconds)}")));
+            var pc = new List<string>();
+            Add(pc, "Productiv", d.PhoneProductiveMinutes * 60, tot * 60);
+            Add(pc, "Neutru", d.PhoneNeutralMinutes * 60, tot * 60);
+            Add(pc, "Neproductiv", d.PhoneUnproductiveMinutes * 60, tot * 60);
+            if (pc.Count > 0) sb.Append('\n').Append(string.Join(" · ", pc));
+
+            // Golul dintre totalul Apple și suma aplicațiilor numite. Fără el, procentele de mai
+            // sus par să nu se închidă și ai crede că lipsește ceva din raport.
+            var gol = d.PhoneUnclassifiedMinutes
+                      + Math.Max(0, tot - (d.PhoneProductiveMinutes + d.PhoneNeutralMinutes
+                                           + d.PhoneUnproductiveMinutes + d.PhoneUnclassifiedMinutes));
+            if (gol >= 1 && tot > 0)
+                sb.Append("\nNedetaliat ").Append(Dur(gol * 60))
+                  .Append(" (").Append((int)Math.Round(gol / tot * 100)).Append("%)");
+
+            var ptop = d.PhoneTopApps ?? Array.Empty<(string, double)>();
+            if (ptop.Count > 0)
+                sb.Append("\nTop: ")
+                  .Append(string.Join(" · ", ptop.Select(a => $"{Esc(a.Name)} {Dur(a.Minutes * 60)}")));
+
+            if (!nimicPePc)
+                sb.Append("\n\n<b>Împreună ").Append(Dur(d.ActiveSeconds + tot * 60)).Append("</b>");
+        }
 
         return sb.ToString() + PhoneHint(d);
 

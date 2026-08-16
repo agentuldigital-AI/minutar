@@ -94,6 +94,25 @@ no_break_hours             = 2
 rule_deadline_drift        = false
 deadline_drift_days        = 3
 
+# --- Briefing zilnic pe Telegram (optional) -----------------------------------
+# La pornirea aplicatiei primesti pe Telegram un rezumat al zilei de ieri, o
+# singura data pe zi. Nu la ora fixa: calculatorul nu sta aprins non-stop, iar
+# la pornire mesajul ajunge cand chiar te asezi la treaba.
+#
+# Ca sa-l activezi: scrie-i lui @BotFather in Telegram, /newbot, iei tokenul.
+# Apoi deschide botul tau si apasa Start — fara asta Telegram nu-i da voie sa-ti
+# scrie. chat_id-ul il vezi deschizand in browser:
+#   https://api.telegram.org/bot<TOKEN>/getUpdates   (cauta "chat":{"id":)
+#
+# Tokenul e o parola: cine il are poate trimite mesaje ca botul tau. Fisierul
+# asta ajunge in %LOCALAPPDATA% la instalare — nu pune tokenul in copia din repo.
+[telegram]
+enabled                 = false
+bot_token               = ""
+chat_id                 = ""
+daily_briefing          = true
+briefing_delay_seconds  = 25
+
 # --- Proiectele tale: adaugă câte un bloc [[projects]] per proiect ------------------
 # keywords         = cuvinte din titlul ferestrei care atribuie timpul pe proiect
 # claude_dirs      = folderele în care rulezi Claude Code pentru acest proiect

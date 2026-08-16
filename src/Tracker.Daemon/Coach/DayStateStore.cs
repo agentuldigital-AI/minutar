@@ -27,6 +27,8 @@ public sealed class DayState
     public string TomorrowPlan { get; set; } = "";
     public bool IntentPromptShown { get; set; }
     public bool ShutdownPromptShown { get; set; }
+    /// <summary>Briefingul de dimineață a plecat pe Telegram — o repornire nu îl retrimite.</summary>
+    public bool BriefingSent { get; set; }
     public List<NudgeRecord> Nudges { get; set; } = new();
 }
 
@@ -76,11 +78,18 @@ public sealed class DayStateStore
 
     public DayState Today() => Load(DateTimeOffset.Now.ToString("yyyy-MM-dd"));
 
-    public void Mutate(Action<DayState> change)
+    public void Mutate(Action<DayState> change) => Mutate(DateTimeOffset.Now.ToString("yyyy-MM-dd"), change);
+
+    /// <summary>
+    /// Citire-modificare-scriere atomică pentru o zi anume. Ziua explicită contează pentru acțiuni
+    /// lungi: una care începe seara și se termină după miezul nopții trebuie să marcheze ziua în
+    /// care a pornit, nu pe cea nouă.
+    /// </summary>
+    public void Mutate(string date, Action<DayState> change)
     {
         lock (_lock)
         {
-            var s = Today();
+            var s = Load(date);
             change(s);
             Save(s);
         }

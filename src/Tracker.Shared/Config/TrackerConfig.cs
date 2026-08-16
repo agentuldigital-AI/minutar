@@ -28,6 +28,7 @@ public sealed class TrackerConfig
     public FocusConfig Focus { get; set; } = new();
     public ProfileConfig Profile { get; set; } = new();
     public CoachConfig Coach { get; set; } = new();
+    public TelegramConfig Telegram { get; set; } = new();
 
     public static TrackerConfig Load(string path)
     {
@@ -109,6 +110,10 @@ public sealed class TrackerConfig
         Require(Focus.GraceSeconds >= 1, "focus.grace_seconds must be >= 1");
         Require(Focus.CountdownSeconds >= 3, "focus.countdown_seconds must be >= 3");
         Require(Focus.DefaultMinutes >= 1, "focus.default_minutes must be >= 1");
+        // Token-ul/chat-ul lipsă NU sunt eroare de validare intenționat: pe hot-reload o excepție
+        // aici ar păstra tăcut configul vechi (ConfigProvider), iar tu ai crede că ai salvat.
+        // Lipsa lor se tratează la rulare, cu un mesaj în log.
+        Require(Telegram.BriefingDelaySeconds >= 0, "telegram.briefing_delay_seconds must be >= 0");
 
         static void Require(bool ok, string message)
         {
@@ -417,6 +422,28 @@ public sealed class SupervisorConfig
     public string DaemonExe { get; set; } = "";
 
     public int CheckSeconds { get; set; } = 10;
+}
+
+/// <summary>
+/// Botul personal de Telegram. Token-ul stă doar în tracker.toml din %LOCALAPPDATA% — nu în repo,
+/// și nu e expus de GET /api/config.
+/// </summary>
+public sealed class TelegramConfig
+{
+    /// <summary>Comutatorul principal. Implicit oprit: fără token nu are ce trimite.</summary>
+    public bool Enabled { get; set; }
+
+    /// <summary>Token-ul primit de la @BotFather.</summary>
+    public string BotToken { get; set; } = "";
+
+    /// <summary>Id-ul conversației private cu botul (numeric).</summary>
+    public string ChatId { get; set; } = "";
+
+    /// <summary>Briefingul de ieri, o singură dată pe zi, la pornirea daemonului.</summary>
+    public bool DailyBriefing { get; set; } = true;
+
+    /// <summary>Răgaz după pornire: bucket-urile se așază, iar rețeaua de după login vine târziu.</summary>
+    public int BriefingDelaySeconds { get; set; } = 25;
 }
 
 internal static class TomlOptions

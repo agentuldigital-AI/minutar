@@ -145,6 +145,14 @@ public static class ConfigWriter
         sb.AppendLine($"rule_deadline_drift        = {(c.Coach.RuleDeadlineDrift ? "true" : "false")}");
         sb.AppendLine($"deadline_drift_days        = {c.Coach.DeadlineDriftDays}");
 
+        sb.AppendLine();
+        sb.AppendLine("[telegram]");
+        sb.AppendLine($"enabled                 = {(c.Telegram.Enabled ? "true" : "false")}");
+        sb.AppendLine($"bot_token               = {Q(c.Telegram.BotToken)}");
+        sb.AppendLine($"chat_id                 = {Q(c.Telegram.ChatId)}");
+        sb.AppendLine($"daily_briefing          = {(c.Telegram.DailyBriefing ? "true" : "false")}");
+        sb.AppendLine($"briefing_delay_seconds  = {c.Telegram.BriefingDelaySeconds}");
+
         foreach (var p in c.Projects)
         {
             sb.AppendLine();

@@ -82,6 +82,8 @@ var claude = new ClaudeModule(config, windowStore, store, host);
 
 var report = new ReportService(store, config, host);
 var coach = new CoachEngine(config, engine, popupService, days, cfg.Server.BridgePort, store);
+using var telegram = new Tracker.Daemon.Briefing.TelegramClient();
+var briefing = new Tracker.Daemon.Briefing.BriefingService(config, report, days, telegram);
 
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
@@ -93,6 +95,7 @@ builder.Services.AddHostedService(_ => engine);
 builder.Services.AddHostedService(_ => popupController);
 builder.Services.AddHostedService(_ => claude);
 builder.Services.AddHostedService(_ => coach);
+builder.Services.AddHostedService(_ => briefing);
 builder.Services.AddHostedService(_ => new Tracker.Daemon.Storage.BackupService(eventStore));
 var app = builder.Build();
 
@@ -110,6 +113,7 @@ app.MapPut("/api/day", (DayState state) =>
     // ritual flags and nudge history are engine-owned — never reset by the UI
     state.IntentPromptShown |= existing.IntentPromptShown;
     state.ShutdownPromptShown |= existing.ShutdownPromptShown;
+    state.BriefingSent |= existing.BriefingSent;
     state.Nudges = existing.Nudges;
     days.Save(state);
     return Results.Ok(new { saved = true });
@@ -121,6 +125,21 @@ app.MapPost("/coach/test", () =>
         config.Current.Coach.ToastSeconds, () => System.Diagnostics.Process.Start(
             new System.Diagnostics.ProcessStartInfo($"http://localhost:{config.Current.Server.BridgePort}") { UseShellExecute = true }));
     return Results.Ok(new { shown = true });
+});
+
+// Briefing: previzualizare + trimitere la cerere, ca să nu fie nevoie de o repornire ca să-l testezi.
+// „preview" nu atinge Telegram și nu marchează ziua — doar arată textul.
+app.MapPost("/briefing/test", async (bool? preview, CancellationToken ct) =>
+{
+    var text = await briefing.ComposeAsync(ct);
+    if (preview == true) return Results.Ok(new { sent = false, text });
+
+    var t = config.Current.Telegram;
+    if (t.BotToken.Trim().Length == 0 || t.ChatId.Trim().Length == 0)
+        return Results.BadRequest(new { sent = false, error = "lipsește telegram.bot_token sau telegram.chat_id", text });
+
+    var ok = await telegram.SendAsync(t.BotToken.Trim(), t.ChatId.Trim(), text, ct);
+    return Results.Ok(new { sent = ok, text });
 });
 
 if (Directory.Exists(Path.Combine(AppContext.BaseDirectory, "wwwroot")))

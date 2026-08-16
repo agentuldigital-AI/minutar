@@ -14,6 +14,9 @@ public enum BriefingPeriod
     PhoneImport,
 }
 
+/// <summary>O activitate din clasament: aplicație sau site, cu timpul ei în secunde.</summary>
+public sealed record TopItem(string Name, double Seconds);
+
 /// <summary>Cifrele unui interval, atât cât încape într-un mesaj de telefon.</summary>
 public sealed record BriefingData(
     BriefingPeriod Kind,
@@ -25,13 +28,15 @@ public sealed record BriefingData(
     double NeutralSeconds,
     double UnproductiveSeconds,
     double PhoneMinutes,
-    IReadOnlyList<(string Name, double Seconds)> TopApps,
+    IReadOnlyList<TopItem>? TopProductive = null,
+    IReadOnlyList<TopItem>? TopUnproductive = null,
     double PhoneProductiveMinutes = 0,
     double PhoneNeutralMinutes = 0,
     double PhoneUnproductiveMinutes = 0,
     /// <summary>Diferența dintre totalul Apple și suma aplicațiilor numite — vezi pagina Telefon.</summary>
     double PhoneUnclassifiedMinutes = 0,
-    IReadOnlyList<(string Name, double Minutes)>? PhoneTopApps = null,
+    IReadOnlyList<TopItem>? PhoneTopProductive = null,
+    IReadOnlyList<TopItem>? PhoneTopUnproductive = null,
     /// <summary>Media zilnică anterioară (zi) sau totalul perioadei dinainte (săptămână/lună). 0 = se omite.</summary>
     double CompareSeconds = 0,
     /// <summary>Nu există date de telefon pentru interval — se cere un import, nu se tace.</summary>
@@ -47,7 +52,20 @@ public sealed record BriefingData(
 /// </summary>
 public static class BriefingComposer
 {
+    private const int TopCount = 3;
+
     private static readonly CultureInfo Ro = CultureInfo.GetCultureInfo("ro-RO");
+
+    /// <summary>
+    /// Un browser e RECIPIENT, nu activitate: timpul lui e deja detaliat de site-urile din el,
+    /// care apar separat în aceeași listă. Aceeași regulă ca la telefon — dacă l-am număra,
+    /// clasamentul ar arăta „msedge.exe" acolo unde răspunsul util e site-ul propriu-zis.
+    /// </summary>
+    private static readonly HashSet<string> Browsers = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "chrome.exe", "msedge.exe", "brave.exe", "firefox.exe", "opera.exe", "opera_gx.exe",
+        "vivaldi.exe", "arc.exe", "librewolf.exe", "waterfox.exe",
+    };
 
     private static readonly JsonSerializerOptions ReportJson = new()
     {
@@ -66,21 +84,10 @@ public static class BriefingComposer
         var totals = Obj(root, "totals");
         var byClass = totals is { } t ? Obj(t, "byClass") : null;
 
-        var apps = new List<(string, double)>();
-        if (root.TryGetProperty("byApp", out var byApp) && byApp.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var a in byApp.EnumerateArray().Take(3))
-            {
-                var name = Str(a, "name");
-                var sec = Num(a, "seconds");
-                if (name.Length > 0 && sec > 0) apps.Add((name, sec));
-            }
-        }
-
         var phone = 0d;
         var phoneMissing = true;
         double phProd = 0, phNeu = 0, phUnp = 0, phUncl = 0;
-        var phoneApps = new List<(string, double)>();
+        List<TopItem> phTopProd = new(), phTopUnp = new();
         if (root.TryGetProperty("phone", out var ph) && ph.ValueKind == JsonValueKind.Object)
         {
             phone = Num(ph, "totalMinutes");
@@ -95,15 +102,8 @@ public static class BriefingComposer
                 phNeu = Num(pbc, "neutral");
                 phUnp = Num(pbc, "unproductive");
             }
-            if (ph.TryGetProperty("apps", out var pa) && pa.ValueKind == JsonValueKind.Array)
-            {
-                foreach (var a in pa.EnumerateArray().Take(3))
-                {
-                    var n = Str(a, "name");
-                    var m = Num(a, "minutes");
-                    if (n.Length > 0 && m > 0) phoneApps.Add((n, m));
-                }
-            }
+            phTopProd = PhoneTop(ph, "productive");
+            phTopUnp = PhoneTop(ph, "unproductive");
         }
 
         var compare = 0d;
@@ -120,7 +120,46 @@ public static class BriefingComposer
             byClass is { } ? Num(byClass.Value, "productive") : 0,
             byClass is { } ? Num(byClass.Value, "neutral") : 0,
             byClass is { } ? Num(byClass.Value, "unproductive") : 0,
-            phone, apps, phProd, phNeu, phUnp, phUncl, phoneApps, compare, phoneMissing);
+            phone,
+            PcTop(root, "productive"), PcTop(root, "unproductive"),
+            phProd, phNeu, phUnp, phUncl, phTopProd, phTopUnp,
+            compare, phoneMissing);
+    }
+
+    /// <summary>Aplicațiile și site-urile unei clase, amestecate și sortate — browserele sărite.</summary>
+    private static List<TopItem> PcTop(JsonElement root, string cls)
+    {
+        var outp = new List<TopItem>();
+        if (Obj(root, "classDetail") is not { } cd || Obj(cd, cls) is not { } node) return outp;
+
+        foreach (var (prop, skipBrowsers) in new[] { ("apps", true), ("domains", false) })
+        {
+            if (!node.TryGetProperty(prop, out var arr) || arr.ValueKind != JsonValueKind.Array) continue;
+            foreach (var e in arr.EnumerateArray())
+            {
+                var name = Str(e, "name");
+                var sec = Num(e, "seconds");
+                if (name.Length == 0 || sec < 60) continue;
+                if (skipBrowsers && Browsers.Contains(name)) continue;
+                outp.Add(new TopItem(name, sec));
+            }
+        }
+        return outp.OrderByDescending(i => i.Seconds).Take(TopCount).ToList();
+    }
+
+    /// <summary>Aplicațiile de telefon dintr-o clasă. Browserele sunt deja excluse de PhoneUsage.</summary>
+    private static List<TopItem> PhoneTop(JsonElement phone, string cls)
+    {
+        var outp = new List<TopItem>();
+        if (!phone.TryGetProperty("apps", out var apps) || apps.ValueKind != JsonValueKind.Array) return outp;
+        foreach (var a in apps.EnumerateArray())
+        {
+            if (!string.Equals(Str(a, "cls"), cls, StringComparison.OrdinalIgnoreCase)) continue;
+            var name = Str(a, "name");
+            var min = Num(a, "minutes");
+            if (name.Length > 0 && min >= 1) outp.Add(new TopItem(name, min * 60));
+        }
+        return outp.OrderByDescending(i => i.Seconds).Take(TopCount).ToList();
     }
 
     /// <summary>Mesajul propriu-zis. HTML (parse_mode), cu tot ce vine din date escapat.</summary>
@@ -140,9 +179,9 @@ public static class BriefingComposer
             return sb.ToString() + PhoneHint(d);
         }
 
-        // Un bloc per dispozitiv. „Activ" singur era ambiguu: nu spunea dacă include și telefonul.
-        // Fiecare bloc își are propria defalcare, pentru că un telefon poate fi 47% neproductiv
-        // în timp ce calculatorul e 74% productiv — o singură medie ar ascunde exact asta.
+        // Un bloc per dispozitiv, cu clasele UNA PE RÂND. Pe un ecran de telefon, trei perechi
+        // cifră-procent înșirate pe același rând se citesc greu; pe rânduri separate se compară
+        // dintr-o privire.
         if (nimicPePc)
         {
             sb.Append("\n\nPe calculator, nimic înregistrat.");
@@ -151,17 +190,14 @@ public static class BriefingComposer
         {
             sb.Append("\n\n<b>Calculator ").Append(Dur(d.ActiveSeconds)).Append("</b>");
             if (d.CompareSeconds >= 60)
-                sb.Append(" — ").Append(CompareLabel(d.Kind)).Append(": ").Append(Dur(d.CompareSeconds));
+                sb.Append("\n<i>").Append(CompareLabel(d.Kind)).Append(": ").Append(Dur(d.CompareSeconds)).Append("</i>");
 
-            var clase = new List<string>();
-            Add(clase, "Productiv", d.ProductiveSeconds, d.ActiveSeconds);
-            Add(clase, "Neutru", d.NeutralSeconds, d.ActiveSeconds);
-            Add(clase, "Neproductiv", d.UnproductiveSeconds, d.ActiveSeconds);
-            if (clase.Count > 0) sb.Append('\n').Append(string.Join(" · ", clase));
+            Line(sb, "Productiv", d.ProductiveSeconds, d.ActiveSeconds);
+            Line(sb, "Neutru", d.NeutralSeconds, d.ActiveSeconds);
+            Line(sb, "Neproductiv", d.UnproductiveSeconds, d.ActiveSeconds);
 
-            if (d.TopApps.Count > 0)
-                sb.Append("\nTop: ")
-                  .Append(string.Join(" · ", d.TopApps.Select(a => $"{Esc(a.Name)} {Dur(a.Seconds)}")));
+            Top(sb, "Top activități productive", d.TopProductive);
+            Top(sb, "Top activități neproductive", d.TopUnproductive);
         }
 
         if (!nimicPeTelefon)
@@ -169,25 +205,19 @@ public static class BriefingComposer
             var tot = d.PhoneMinutes;
             sb.Append("\n\n<b>Telefon ").Append(Dur(tot * 60)).Append("</b>");
 
-            var pc = new List<string>();
-            Add(pc, "Productiv", d.PhoneProductiveMinutes * 60, tot * 60);
-            Add(pc, "Neutru", d.PhoneNeutralMinutes * 60, tot * 60);
-            Add(pc, "Neproductiv", d.PhoneUnproductiveMinutes * 60, tot * 60);
-            if (pc.Count > 0) sb.Append('\n').Append(string.Join(" · ", pc));
+            Line(sb, "Productiv", d.PhoneProductiveMinutes * 60, tot * 60);
+            Line(sb, "Neutru", d.PhoneNeutralMinutes * 60, tot * 60);
+            Line(sb, "Neproductiv", d.PhoneUnproductiveMinutes * 60, tot * 60);
 
             // Golul dintre totalul Apple și suma aplicațiilor numite. Fără el, procentele de mai
             // sus par să nu se închidă și ai crede că lipsește ceva din raport.
             var gol = d.PhoneUnclassifiedMinutes
                       + Math.Max(0, tot - (d.PhoneProductiveMinutes + d.PhoneNeutralMinutes
                                            + d.PhoneUnproductiveMinutes + d.PhoneUnclassifiedMinutes));
-            if (gol >= 1 && tot > 0)
-                sb.Append("\nNedetaliat ").Append(Dur(gol * 60))
-                  .Append(" (").Append((int)Math.Round(gol / tot * 100)).Append("%)");
+            Line(sb, "Nedetaliat", gol * 60, tot * 60);
 
-            var ptop = d.PhoneTopApps ?? Array.Empty<(string, double)>();
-            if (ptop.Count > 0)
-                sb.Append("\nTop: ")
-                  .Append(string.Join(" · ", ptop.Select(a => $"{Esc(a.Name)} {Dur(a.Minutes * 60)}")));
+            Top(sb, "Top activități productive", d.PhoneTopProductive);
+            Top(sb, "Top activități neproductive", d.PhoneTopUnproductive);
 
             if (!nimicPePc)
                 sb.Append("\n\n<b>Împreună ").Append(Dur(d.ActiveSeconds + tot * 60)).Append("</b>");
@@ -195,11 +225,18 @@ public static class BriefingComposer
 
         return sb.ToString() + PhoneHint(d);
 
-        static void Add(List<string> into, string label, double seconds, double total)
+        static void Line(StringBuilder sb, string label, double seconds, double total)
         {
             if (seconds < 60) return;
             var pct = total > 0 ? (int)Math.Round(seconds / total * 100) : 0;
-            into.Add($"{label} {Dur(seconds)} ({pct}%)");
+            sb.Append('\n').Append(label).Append(' ').Append(Dur(seconds)).Append(" (").Append(pct).Append("%)");
+        }
+
+        static void Top(StringBuilder sb, string label, IReadOnlyList<TopItem>? items)
+        {
+            if (items is null || items.Count == 0) return;
+            sb.Append("\n\n<b>").Append(label).Append("</b>\n")
+              .Append(string.Join("\n", items.Select(i => $"· {Esc(i.Name)} {Dur(i.Seconds)}")));
         }
     }
 

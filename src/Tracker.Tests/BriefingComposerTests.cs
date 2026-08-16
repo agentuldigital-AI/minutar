@@ -111,19 +111,22 @@ public class BriefingBoundsTests
 /// </summary>
 public class BriefingComposerTests
 {
+    private static IReadOnlyList<TopItem> Items(params (string, double)[] xs) =>
+        xs.Select(x => new TopItem(x.Item1, x.Item2)).ToList();
+
     private static BriefingData Data(
         BriefingPeriod kind = BriefingPeriod.Day,
         string from = "2026-08-14", string to = "2026-08-15",
         double active = 6 * 3600 + 12 * 60,
         double prod = 4 * 3600, double neutral = 3600, double unprod = 72 * 60,
         double phoneMin = 0, double compare = 0,
-        IReadOnlyList<(string, double)>? apps = null,
+        IReadOnlyList<TopItem>? topProd = null, IReadOnlyList<TopItem>? topUnp = null,
         bool phoneMissing = false,
         double phProd = 0, double phNeu = 0, double phUnp = 0, double phUncl = 0,
-        IReadOnlyList<(string, double)>? phoneApps = null) =>
+        IReadOnlyList<TopItem>? phTopProd = null, IReadOnlyList<TopItem>? phTopUnp = null) =>
         new(kind, DateOnly.Parse(from, CultureInfo.InvariantCulture), DateOnly.Parse(to, CultureInfo.InvariantCulture),
-            active, prod, neutral, unprod, phoneMin, apps ?? Array.Empty<(string, double)>(),
-            phProd, phNeu, phUnp, phUncl, phoneApps, compare, phoneMissing);
+            active, prod, neutral, unprod, phoneMin, topProd, topUnp,
+            phProd, phNeu, phUnp, phUncl, phTopProd, phTopUnp, compare, phoneMissing);
 
     [Theory]
     [InlineData(0, "0m")]
@@ -152,8 +155,8 @@ public class BriefingComposerTests
         var text = BriefingComposer.Compose(
             Data(active: 8 * 3600, prod: 4 * 3600, neutral: 2 * 3600, unprod: 2 * 3600));
 
-        Assert.Contains("Productiv 4h 00m (50%)", text);
-        Assert.Contains("Neutru 2h 00m (25%)", text);
+        Assert.Contains("\nProductiv 4h 00m (50%)", text);
+        Assert.Contains("\nNeutru 2h 00m (25%)", text);
     }
 
     [Fact]
@@ -199,7 +202,7 @@ public class BriefingComposerTests
         var text = BriefingComposer.Compose(Data(
             active: 2 * 3600, phoneMin: 600,
             phProd: 60, phNeu: 120, phUnp: 300, phUncl: 120,
-            phoneApps: new[] { ("MemeBox", 300d), ("Harta", 120d) }));
+            phTopUnp: Items(("MemeBox", 300 * 60d))));
 
         Assert.Contains("<b>Calculator 2h 00m</b>", text);
         Assert.Contains("<b>Telefon 10h 00m</b>", text);
@@ -246,10 +249,43 @@ public class BriefingComposerTests
     [Fact]
     public void NumeleDeAplicatii_SuntEscapateCaHtml()
     {
-        var text = BriefingComposer.Compose(Data(apps: new[] { ("AT&T <Research>", 3600d) }));
+        var text = BriefingComposer.Compose(Data(topProd: Items(("AT&T <Research>", 3600d))));
 
         Assert.Contains("AT&amp;T &lt;Research&gt;", text);
         Assert.DoesNotContain("<Research>", text);
+    }
+
+    [Fact]
+    public void TopurileSuntPeClasa_SiEtichetatePeIntelesulOricui()
+    {
+        var text = BriefingComposer.Compose(Data(
+            topProd: Items(("claude.exe", 7200d)), topUnp: Items(("memebox.example", 3600d))));
+
+        Assert.Contains("Top activități productive", text);
+        Assert.Contains("Top activități neproductive", text);
+        // productivele apar INAINTEA neproductivelor
+        Assert.True(text.IndexOf("productive", StringComparison.Ordinal)
+                    < text.IndexOf("neproductive", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void FiecareClasaStaPeRandulEi()
+    {
+        var text = BriefingComposer.Compose(Data(active: 4 * 3600, prod: 2 * 3600, neutral: 3600, unprod: 3600));
+
+        // pe un ecran de telefon, trei perechi pe acelasi rand se citesc greu
+        Assert.DoesNotContain("· Neutru", text);
+        Assert.Contains("\nProductiv ", text);
+        Assert.Contains("\nNeutru ", text);
+        Assert.Contains("\nNeproductiv ", text);
+    }
+
+    [Fact]
+    public void TopGol_NuLasaOEticheraFaraNimicSubEa()
+    {
+        var text = BriefingComposer.Compose(Data(topProd: null, topUnp: null));
+
+        Assert.DoesNotContain("Top activități", text);
     }
 
     [Fact]
@@ -306,7 +342,7 @@ public class BriefingComposerTests
     }
 
     [Fact]
-    public void FromReport_CitesteRaportulRealSiCalculeazaMedia()
+    public void FromReport_CitesteRaportulRealSiTopurilePeClasa()
     {
         var day = new
         {
@@ -318,14 +354,30 @@ public class BriefingComposerTests
                     ["productive"] = 14700, ["neutral"] = 4200, ["unproductive"] = 3420,
                 },
             },
-            byApp = new[]
+            classDetail = new Dictionary<string, object>
             {
-                new { name = "chrome.exe", seconds = 9660.0 },
-                new { name = "Code.exe", seconds = 6720.0 },
-                new { name = "slack.exe", seconds = 2640.0 },
-                new { name = "explorer.exe", seconds = 600.0 },
+                ["productive"] = new
+                {
+                    apps = new[] { new { name = "Code.exe", seconds = 9660.0 } },
+                    domains = new[] { new { name = "github.example", seconds = 2400.0 } },
+                },
+                ["unproductive"] = new
+                {
+                    apps = new[] { new { name = "Chat.exe", seconds = 1800.0 } },
+                    domains = new[] { new { name = "memebox.example", seconds = 3600.0 } },
+                },
             },
-            phone = new { totalMinutes = 204.0, periods = new[] { new { From = "2026-08-10" } } },
+            phone = new
+            {
+                totalMinutes = 204.0,
+                periods = new[] { new { From = "2026-08-10" } },
+                apps = new[]
+                {
+                    new { name = "MemeBox", minutes = 90.0, cls = "unproductive" },
+                    new { name = "Carte", minutes = 40.0, cls = "productive" },
+                    new { name = "Harta", minutes = 30.0, cls = "neutral" },
+                },
+            },
         };
         var week = new { totals = new { activeSeconds = 146160.0 } };
 
@@ -333,19 +385,51 @@ public class BriefingComposerTests
             BriefingPeriod.Day, new DateOnly(2026, 8, 14), new DateOnly(2026, 8, 15), day, week, 7);
 
         Assert.Equal(22320, d.ActiveSeconds);
-        Assert.Equal(14700, d.ProductiveSeconds);
         Assert.Equal(204, d.PhoneMinutes);
-        Assert.Equal(3, d.TopApps.Count); // doar primele trei intră în mesaj
-        Assert.Equal("chrome.exe", d.TopApps[0].Name);
         Assert.Equal(146160.0 / 7, d.CompareSeconds);
         Assert.False(d.PhoneMissing);
+
+        // aplicatiile si site-urile clasei se amesteca si se sorteaza dupa timp
+        Assert.Equal("Code.exe", d.TopProductive![0].Name);
+        Assert.Equal("memebox.example", d.TopUnproductive![0].Name);
+        Assert.Equal("Chat.exe", d.TopUnproductive[1].Name);
+
+        // telefonul se filtreaza dupa clasa proprie, nu dupa timpul total
+        Assert.Equal("MemeBox", d.PhoneTopUnproductive![0].Name);
+        Assert.Equal("Carte", d.PhoneTopProductive![0].Name);
+        Assert.DoesNotContain(d.PhoneTopProductive, i => i.Name == "Harta"); // neutru nu intra nicaieri
+    }
+
+    [Fact]
+    public void FromReport_BrowserulNuIntraInClasament()
+    {
+        // un browser e recipient: timpul lui e deja detaliat de site-urile din el, care apar
+        // separat in aceeasi lista. Numarat, ar arata „msedge.exe" acolo unde raspunsul util
+        // e site-ul propriu-zis.
+        var rep = new
+        {
+            classDetail = new Dictionary<string, object>
+            {
+                ["unproductive"] = new
+                {
+                    apps = new[] { new { name = "msedge.exe", seconds = 7000.0 } },
+                    domains = new[] { new { name = "memebox.example", seconds = 3400.0 } },
+                },
+            },
+        };
+
+        var d = BriefingComposer.FromReport(
+            BriefingPeriod.Week, new DateOnly(2026, 8, 10), new DateOnly(2026, 8, 17), rep);
+
+        Assert.Single(d.TopUnproductive!);
+        Assert.Equal("memebox.example", d.TopUnproductive![0].Name);
     }
 
     [Fact]
     public void FromReport_FaraPerioadeDeTelefon_MarcheazaLipsa()
     {
-        // „lipsă" înseamnă că nu există niciun import care atinge intervalul — nu că e zero.
-        // Zero minute importate e o informație; niciun import e alta.
+        // „lipsa" inseamna ca nu exista niciun import care atinge intervalul — nu ca e zero.
+        // Zero minute importate e o informatie, niciun import e alta.
         var rep = new { phone = new { totalMinutes = 0.0, periods = Array.Empty<object>() } };
 
         var d = BriefingComposer.FromReport(
@@ -362,19 +446,33 @@ public class BriefingComposerTests
 
         Assert.Equal(0, d.ActiveSeconds);
         Assert.Equal(0, d.PhoneMinutes);
-        Assert.Empty(d.TopApps);
+        Assert.Empty(d.TopProductive!);
+        Assert.Empty(d.TopUnproductive!);
         Assert.Equal(0, d.CompareSeconds);
     }
 
     [Fact]
-    public void FromReport_AplicatiiFaraTimp_SuntIgnorate()
+    public void FromReport_ActivitatiSubUnMinut_SuntIgnorate()
     {
-        var day = new { byApp = new[] { new { name = "idle.exe", seconds = 0.0 }, new { name = "chrome.exe", seconds = 60.0 } } };
+        var rep = new
+        {
+            classDetail = new Dictionary<string, object>
+            {
+                ["productive"] = new
+                {
+                    apps = new[]
+                    {
+                        new { name = "fulger.exe", seconds = 30.0 },
+                        new { name = "Code.exe", seconds = 600.0 },
+                    },
+                },
+            },
+        };
 
         var d = BriefingComposer.FromReport(
-            BriefingPeriod.Day, new DateOnly(2026, 8, 14), new DateOnly(2026, 8, 15), day, null);
+            BriefingPeriod.Day, new DateOnly(2026, 8, 14), new DateOnly(2026, 8, 15), rep);
 
-        Assert.Single(d.TopApps);
-        Assert.Equal("chrome.exe", d.TopApps[0].Name);
+        Assert.Single(d.TopProductive!);
+        Assert.Equal("Code.exe", d.TopProductive![0].Name);
     }
 }

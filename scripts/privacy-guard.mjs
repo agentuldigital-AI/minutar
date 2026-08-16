@@ -61,7 +61,13 @@ const PHRASES = [
  * aceleasi locuri nevinovate si te invata s-o ignori. Semnalul real e ora lipita de un verb
  * de observare; restul cazurilor sunt deja prinse de PHRASES („observed 19:57").
  */
-const WALLCLOCK = [/\b(?:at|exited\s+at|la\s+ora|ora)\s+(?:[01]?\d|2[0-3]):[0-5]\d\b/i];
+const WALLCLOCK = [
+  // Semnalul e VERBUL, nu ora. „exited at 12:37" descrie ceva ce s-a intamplat cu tine;
+  // „ruleaza la ora 03:30" descrie o setare si nu spune nimic despre nimeni. Prima versiune
+  // prindea si a doua, iar o garda care latra pe programari te invata s-o ignori.
+  /\b(?:observed|seen|exited|crashed|died|woke|logged|happened|fired)\s+(?:at\s+)?(?:[01]?\d|2[0-3]):[0-5]\d\b/i,
+  /\b(?:observat|surprins|s-a\s+oprit|a\s+iesit)\s+(?:la\s+)?(?:[01]?\d|2[0-3]):[0-5]\d\b/i,
+];
 
 /** Durate cu aspect de măsurătoare reală: „709 min", „11h 30m", „23h 20m". */
 const DURATIONS = [

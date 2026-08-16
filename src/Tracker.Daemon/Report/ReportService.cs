@@ -176,6 +176,42 @@ public sealed class ReportService
             presenceSec = activeSec + afkSec; // ecuația din UI e exactă: activ = prezent − AFK
         }
 
+        // Ședințele: etichetă peste timp DEJA măsurat, niciodată adăugată la total. Se calculează
+        // din evenimentele BRUTE de fereastră, pentru că titlul — singurul semnal care distinge
+        // „în apel" de „aplicație deschisă" — nu supraviețuiește în ClassifiedSlice.
+        object? meetings = null;
+        var meetCfg = _config.Current.Meetings;
+        if (meetCfg.Enabled)
+        {
+            var blocks = DetectMeetings(window, web, active, meetCfg);
+            if (blocks.Count > 0)
+            {
+                var inMeeting = slices
+                    .Where(s => s.Cls != "unproductive")   // o pauză pe rețele nu e timp de ședință
+                    .Select(s => (s.App, Sec: OverlapSeconds(s.Start, s.End, blocks)))
+                    .Where(x => x.Sec > 0)
+                    .ToList();
+                var totalSec = inMeeting.Sum(x => x.Sec);
+                var appSec = inMeeting
+                    .Where(x => meetCfg.Apps.Any(a => a.Equals(x.App, StringComparison.OrdinalIgnoreCase)))
+                    .Sum(x => x.Sec);
+                meetings = new
+                {
+                    seconds = Math.Round(totalSec),
+                    count = blocks.Count,
+                    // cât din ședință ai stat chiar în aplicația de apel, și cât în altă fereastră
+                    inAppSeconds = Math.Round(appSec),
+                    elsewhereSeconds = Math.Round(totalSec - appSec),
+                    blocks = blocks.Select(b => new
+                    {
+                        start = b.Start,
+                        end = b.End,
+                        seconds = Math.Round((b.End - b.Start).TotalSeconds),
+                    }).ToList(),
+                };
+            }
+        }
+
         const int timelineCap = 2000;
         var timelineRuns = BuildTimelineRuns(slices);
         var timeline = timelineRuns
@@ -224,6 +260,8 @@ public sealed class ReportService
             timeline,
             timelineTruncated = timelineRuns.Count > timelineCap,
             // bloc propriu: NU intră în activeSeconds și nu se amestecă în byClass de mai
+            // eticheta peste timp deja masurat — NU se adauga la activeSeconds
+            meetings,
             // sus — unul e cronometrat de noi, celălalt raportat de Apple
             phone = PhoneUsage.Summarize(await phoneTask, _config.Current),
         };
@@ -552,6 +590,93 @@ public sealed class ReportService
     /// </summary>
     private static string? ResolveProject(TrackerConfig cfg, string app, string title, string aumid, string? url, string? profile) =>
         AttributionEngine.Resolve(cfg, app, title, aumid, url, profile);
+
+    /// <summary>
+    /// Intervalele în care era un apel ÎN CURS.
+    ///
+    /// „Timp în ședință" și „timp cu aplicația de apel în față" sunt întrebări diferite: cât
+    /// partajezi un document, fereastra din față e browserul, deși ești tot în ședință. Aici
+    /// găsim intervalul apelului, ca timpul petrecut în ORICE fereastră dinăuntrul lui să poată
+    /// fi etichetat drept ședință.
+    ///
+    /// Semnalul e titlul ferestrei, nu simpla prezență a procesului: aplicațiile de apel scriu
+    /// altceva în titlu într-un apel față de când sunt doar deschise. Fără distincția
+    /// asta, o aplicație lăsată pornită toată ziua ar produce o ședință de opt ore.
+    ///
+    /// Pură și publică intenționat: se testează cu evenimente sintetice, fără daemon.
+    /// </summary>
+    public static List<(DateTimeOffset Start, DateTimeOffset End)> DetectMeetings(
+        List<AwEvent> windowEvents, List<AwEvent> webEvents,
+        List<(DateTimeOffset Start, DateTimeOffset End)> active,
+        MeetingsConfig cfg)
+    {
+        var marks = new List<(DateTimeOffset S, DateTimeOffset E)>();
+
+        foreach (var e in windowEvents)
+        {
+            if (e.Duration <= 0) continue;
+            var app = Str(e.Data, "app") ?? "";
+            if (!cfg.Apps.Any(a => a.Equals(app, StringComparison.OrdinalIgnoreCase))) continue;
+            var title = Str(e.Data, "title") ?? "";
+            if (!cfg.InCallTitles.Any(k => title.Contains(k, StringComparison.OrdinalIgnoreCase))) continue;
+            marks.Add((e.Timestamp, e.Timestamp.AddSeconds(e.Duration)));
+        }
+
+        // apelurile din browser (Meet și altele) nu au titlu de proces — se recunosc după domeniu
+        foreach (var e in webEvents)
+        {
+            if (e.Duration <= 0) continue;
+            var url = Str(e.Data, "url") ?? "";
+            if (!cfg.Domains.Any(d => url.Contains(d, StringComparison.OrdinalIgnoreCase))) continue;
+            marks.Add((e.Timestamp, e.Timestamp.AddSeconds(e.Duration)));
+        }
+
+        if (marks.Count == 0) return new List<(DateTimeOffset, DateTimeOffset)>();
+
+        // Puntea acoperă exact cazul „am partajat o foaie de calcul": semnalul dispare cât timp
+        // altă fereastră e în față, dar apelul continuă.
+        var bridge = TimeSpan.FromMinutes(Math.Max(1, cfg.BridgeMinutes));
+        marks.Sort((a, b) => a.S.CompareTo(b.S));
+        var merged = new List<(DateTimeOffset S, DateTimeOffset E)> { marks[0] };
+        foreach (var m in marks.Skip(1))
+        {
+            var last = merged[^1];
+            if (m.S - last.E <= bridge) merged[^1] = (last.S, m.E > last.E ? m.E : last.E);
+            else merged.Add(m);
+        }
+
+        // Intersecția cu „activ" scoate gratuit AFK-ul și pauza manuală: bucketul de proiect
+        // emite doar cât ești efectiv la calculator.
+        var clipped = new List<(DateTimeOffset Start, DateTimeOffset End)>();
+        foreach (var m in merged)
+        {
+            var s = active.Where(a => a.End > m.S && a.Start < m.E)
+                          .Select(a => (S: a.Start > m.S ? a.Start : m.S, E: a.End < m.E ? a.End : m.E))
+                          .Where(x => x.E > x.S)
+                          .ToList();
+            if (s.Count == 0) continue;
+            // un apel rămâne UN bloc chiar dacă ai fost AFK la mijloc — altfel o pauză de cafea
+            // ar rupe ședința în două
+            clipped.Add((s.Min(x => x.S), s.Max(x => x.E)));
+        }
+
+        var min = TimeSpan.FromMinutes(Math.Max(0, cfg.MinMinutes));
+        return clipped.Where(b => b.End - b.Start >= min).ToList();
+    }
+
+    /// <summary>Câte secunde din [start, end) cad în interiorul intervalelor date.</summary>
+    private static double OverlapSeconds(
+        DateTimeOffset start, DateTimeOffset end, List<(DateTimeOffset Start, DateTimeOffset End)> ivs)
+    {
+        double sum = 0;
+        foreach (var iv in ivs)
+        {
+            var s = start > iv.Start ? start : iv.Start;
+            var e = end < iv.End ? end : iv.End;
+            if (e > s) sum += (e - s).TotalSeconds;
+        }
+        return sum;
+    }
 
     /// <summary>
     /// Bridges sub-3s gaps between consecutive window events: every window/tab switch loses

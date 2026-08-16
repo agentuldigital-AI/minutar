@@ -59,6 +59,14 @@ export interface Report {
   timeline: TimelineSegment[];
   timelineTruncated: boolean;
   /** Timp de pe telefon (import Screen Time) — ținut separat de activeSeconds. */
+  /** Ședințe video: etichetă peste timp deja măsurat, NU se adaugă la activeSeconds. */
+  meetings?: {
+    seconds: number;
+    count: number;
+    inAppSeconds: number;
+    elsewhereSeconds: number;
+    blocks: { start: string; end: string; seconds: number }[];
+  };
   phone?: PhoneSummary;
 }
 

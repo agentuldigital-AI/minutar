@@ -29,6 +29,7 @@ public sealed class TrackerConfig
     public ProfileConfig Profile { get; set; } = new();
     public CoachConfig Coach { get; set; } = new();
     public TelegramConfig Telegram { get; set; } = new();
+    public MeetingsConfig Meetings { get; set; } = new();
 
     public static TrackerConfig Load(string path)
     {
@@ -114,6 +115,7 @@ public sealed class TrackerConfig
         // aici ar păstra tăcut configul vechi (ConfigProvider), iar tu ai crede că ai salvat.
         // Lipsa lor se tratează la rulare, cu un mesaj în log.
         Require(Telegram.BriefingDelaySeconds >= 0, "telegram.briefing_delay_seconds must be >= 0");
+        Require(Meetings.BridgeMinutes >= 1, "meetings.bridge_minutes must be >= 1");
 
         static void Require(bool ok, string message)
         {
@@ -453,6 +455,43 @@ public sealed class TelegramConfig
 
     /// <summary>Răgaz după pornire: bucket-urile se așază, iar rețeaua de după login vine târziu.</summary>
     public int BriefingDelaySeconds { get; set; } = 25;
+}
+
+/// <summary>
+/// Detectarea ședințelor video. „Timp în ședință" și „timp cu Zoom în față" sunt întrebări
+/// diferite: cât partajezi un document, fereastra din față e browserul, deși ești tot în apel.
+/// Secțiunea asta spune cum se recunoaște un apel ÎN CURS, ca să nu numărăm drept ședință o
+/// aplicație doar pornită.
+/// </summary>
+public sealed class MeetingsConfig
+{
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>Procesele care pot găzdui un apel.</summary>
+    public List<string> Apps { get; set; } = new() { "Zoom.exe", "Teams.exe", "ms-teams.exe" };
+
+    /// <summary>
+    /// Fragmente de titlu care arată un apel ÎN CURS. Aplicațiile de apel scriu altceva în titlu
+    /// într-un apel față de când sunt doar deschise — fără distincția asta,
+    /// o aplicație lăsată pornită toată ziua ar produce o ședință de opt ore.
+    /// </summary>
+    public List<string> InCallTitles { get; set; } = new()
+    {
+        "Meeting", "meeting controls", "Screen sharing", "Şedinţă", "Ședință", "Call",
+    };
+
+    /// <summary>Domenii care înseamnă apel în browser (Meet, Whereby și altele).</summary>
+    public List<string> Domains { get; set; } = new() { "meet.google.com", "whereby.com" };
+
+    /// <summary>
+    /// Cât timp poate lipsi semnalul fără ca ședința să se rupă în două. Acoperă exact cazul
+    /// „am partajat o foaie de calcul 20 de minute": fereastra apelului nu mai e în față, dar
+    /// apelul continuă.
+    /// </summary>
+    public int BridgeMinutes { get; set; } = 25;
+
+    /// <summary>Blocurile mai scurte de atât nu sunt ședințe — sunt clickuri rătăcite.</summary>
+    public int MinMinutes { get; set; } = 3;
 }
 
 internal static class TomlOptions

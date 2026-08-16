@@ -156,6 +156,15 @@ public static class ConfigWriter
         sb.AppendLine($"phone_import_briefing   = {(c.Telegram.PhoneImportBriefing ? "true" : "false")}");
         sb.AppendLine($"briefing_delay_seconds  = {c.Telegram.BriefingDelaySeconds}");
 
+        sb.AppendLine();
+        sb.AppendLine("[meetings]");
+        sb.AppendLine($"enabled        = {(c.Meetings.Enabled ? "true" : "false")}");
+        sb.AppendLine($"apps           = {Arr(c.Meetings.Apps)}");
+        sb.AppendLine($"in_call_titles = {Arr(c.Meetings.InCallTitles)}");
+        sb.AppendLine($"domains        = {Arr(c.Meetings.Domains)}");
+        sb.AppendLine($"bridge_minutes = {c.Meetings.BridgeMinutes}");
+        sb.AppendLine($"min_minutes    = {c.Meetings.MinMinutes}");
+
         foreach (var p in c.Projects)
         {
             sb.AppendLine();

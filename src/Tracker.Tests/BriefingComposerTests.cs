@@ -36,6 +36,9 @@ public class TelegramConfigRoundTripTests : IDisposable
         cfg.Telegram.MonthlyBriefing = false;
         cfg.Telegram.PhoneImportBriefing = false;
         cfg.Telegram.BriefingDelaySeconds = 40;
+        cfg.Meetings.Enabled = false;
+        cfg.Meetings.BridgeMinutes = 40;
+        cfg.Meetings.Apps = new List<string> { "Zoom.exe" };
 
         ConfigWriter.Write(cfg, path);
         var r = TrackerConfig.Load(path);
@@ -48,6 +51,9 @@ public class TelegramConfigRoundTripTests : IDisposable
         Assert.False(r.Telegram.MonthlyBriefing);
         Assert.False(r.Telegram.PhoneImportBriefing);
         Assert.Equal(40, r.Telegram.BriefingDelaySeconds);
+        Assert.False(r.Meetings.Enabled);
+        Assert.Equal(40, r.Meetings.BridgeMinutes);
+        Assert.Equal(new[] { "Zoom.exe" }, r.Meetings.Apps);
     }
 
     [Fact]

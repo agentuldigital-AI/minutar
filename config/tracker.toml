@@ -116,6 +116,17 @@ monthly_briefing        = true
 phone_import_briefing   = true
 briefing_delay_seconds  = 25
 
+# Sedintele video. Semnalul e TITLUL ferestrei, nu simpla prezenta a procesului: aplicatiile
+# de apel scriu altceva in titlu cand esti intr-un apel fata de cand sunt doar deschise. Fara
+# distinctia asta, o aplicatie lasata pornita toata ziua ar produce o sedinta de opt ore.
+[meetings]
+enabled        = true
+apps           = ["Zoom.exe", "Teams.exe", "ms-teams.exe"]
+in_call_titles = ["Meeting", "meeting controls", "Screen sharing", "Sedinta", "Call"]
+domains        = ["meet.google.com", "whereby.com"]
+bridge_minutes = 25
+min_minutes    = 3
+
 # --- Proiectele tale: adaugă câte un bloc [[projects]] per proiect ------------------
 # keywords         = cuvinte din titlul ferestrei care atribuie timpul pe proiect
 # claude_dirs      = folderele în care rulezi Claude Code pentru acest proiect

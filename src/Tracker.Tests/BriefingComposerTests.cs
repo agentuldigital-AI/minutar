@@ -39,6 +39,18 @@ public class TelegramConfigRoundTripTests : IDisposable
         cfg.Meetings.Enabled = false;
         cfg.Meetings.BridgeMinutes = 40;
         cfg.Meetings.Apps = new List<string> { "Zoom.exe" };
+        cfg.Calendar.Enabled = true;
+        // cale cu backslash-uri: verifică și că trece prin Lit(), nu prin Q()
+        cfg.Calendar.KeyFile = @"C:\Cheie Test\robot-inventat.json";
+        cfg.Calendar.CalendarId = "cineva@example.com";
+        cfg.Calendar.AgendaInBriefing = false;
+        cfg.Calendar.MaxAgendaItems = 5;
+        cfg.Calendar.TimeoutSeconds = 9;
+        cfg.Calendar.MeetingHosts = new List<string> { "zoom.us" };
+        cfg.Calendar.MeetingTitleKeywords = new List<string> { "apel" };
+        cfg.Calendar.RescheduleAlerts = false;
+        cfg.Calendar.RescheduleMoves = 4;
+        cfg.Calendar.RescheduleWindowDays = 30;
 
         ConfigWriter.Write(cfg, path);
         var r = TrackerConfig.Load(path);
@@ -54,6 +66,17 @@ public class TelegramConfigRoundTripTests : IDisposable
         Assert.False(r.Meetings.Enabled);
         Assert.Equal(40, r.Meetings.BridgeMinutes);
         Assert.Equal(new[] { "Zoom.exe" }, r.Meetings.Apps);
+        Assert.True(r.Calendar.Enabled);
+        Assert.Equal(@"C:\Cheie Test\robot-inventat.json", r.Calendar.KeyFile);
+        Assert.Equal("cineva@example.com", r.Calendar.CalendarId);
+        Assert.False(r.Calendar.AgendaInBriefing);
+        Assert.Equal(5, r.Calendar.MaxAgendaItems);
+        Assert.Equal(9, r.Calendar.TimeoutSeconds);
+        Assert.Equal(new[] { "zoom.us" }, r.Calendar.MeetingHosts);
+        Assert.Equal(new[] { "apel" }, r.Calendar.MeetingTitleKeywords);
+        Assert.False(r.Calendar.RescheduleAlerts);
+        Assert.Equal(4, r.Calendar.RescheduleMoves);
+        Assert.Equal(30, r.Calendar.RescheduleWindowDays);
     }
 
     [Fact]
@@ -63,6 +86,17 @@ public class TelegramConfigRoundTripTests : IDisposable
         // și userul ar crede că a salvat
         var cfg = new TrackerConfig();
         cfg.Telegram.Enabled = true;
+
+        cfg.Validate();
+    }
+
+    [Fact]
+    public void CheiaLipsaCuCalendarPornit_NuInvalideazaConfigul()
+    {
+        // aceeași capcană ca la token: o excepție de validare pe o credențială lipsă ar face
+        // salvarea să pară reușită, păstrând tăcut configul vechi
+        var cfg = new TrackerConfig();
+        cfg.Calendar.Enabled = true;
 
         cfg.Validate();
     }

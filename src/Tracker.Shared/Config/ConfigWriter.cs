@@ -165,6 +165,21 @@ public static class ConfigWriter
         sb.AppendLine($"bridge_minutes = {c.Meetings.BridgeMinutes}");
         sb.AppendLine($"min_minutes    = {c.Meetings.MinMinutes}");
 
+        sb.AppendLine();
+        sb.AppendLine("[calendar]");
+        sb.AppendLine($"enabled                = {(c.Calendar.Enabled ? "true" : "false")}");
+        // Lit(): cale Windows cu backslash-uri, ca la claude.projects_dir și supervisor.*_exe
+        sb.AppendLine($"key_file               = {Lit(c.Calendar.KeyFile)}");
+        sb.AppendLine($"calendar_id            = {Q(c.Calendar.CalendarId)}");
+        sb.AppendLine($"agenda_in_briefing     = {(c.Calendar.AgendaInBriefing ? "true" : "false")}");
+        sb.AppendLine($"meeting_hosts          = {Arr(c.Calendar.MeetingHosts)}");
+        sb.AppendLine($"meeting_title_keywords = {Arr(c.Calendar.MeetingTitleKeywords)}");
+        sb.AppendLine($"max_agenda_items       = {c.Calendar.MaxAgendaItems}");
+        sb.AppendLine($"timeout_seconds        = {c.Calendar.TimeoutSeconds}");
+        sb.AppendLine($"reschedule_alerts      = {(c.Calendar.RescheduleAlerts ? "true" : "false")}");
+        sb.AppendLine($"reschedule_moves       = {c.Calendar.RescheduleMoves}");
+        sb.AppendLine($"reschedule_window_days = {c.Calendar.RescheduleWindowDays}");
+
         foreach (var p in c.Projects)
         {
             sb.AppendLine();

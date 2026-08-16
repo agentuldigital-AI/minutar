@@ -83,8 +83,9 @@ var claude = new ClaudeModule(config, windowStore, store, host);
 var report = new ReportService(store, config, host);
 var coach = new CoachEngine(config, engine, popupService, days, cfg.Server.BridgePort, store);
 using var telegram = new Tracker.Daemon.Briefing.TelegramClient();
+using var calendar = new Tracker.Daemon.Calendar.GoogleCalendarClient(config);
 var briefingState = new Tracker.Daemon.Briefing.BriefingStateStore();
-var briefing = new Tracker.Daemon.Briefing.BriefingService(config, report, days, briefingState, telegram);
+var briefing = new Tracker.Daemon.Briefing.BriefingService(config, report, days, briefingState, telegram, calendar);
 
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 {

@@ -1,6 +1,9 @@
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+// Importat cu numele scurte dinadins: „Calendar" simplu ar fi ambiguu între namespace-ul
+// Tracker.Daemon.Calendar și clasa System.Globalization.Calendar, folosită mai jos.
+using Tracker.Daemon.Calendar;
 
 namespace Tracker.Daemon.Briefing;
 
@@ -43,7 +46,24 @@ public sealed record BriefingData(
     /// <summary>Media zilnică anterioară (zi) sau totalul perioadei dinainte (săptămână/lună). 0 = se omite.</summary>
     double CompareSeconds = 0,
     /// <summary>Nu există date de telefon pentru interval — se cere un import, nu se tace.</summary>
-    bool PhoneMissing = false);
+    bool PhoneMissing = false,
+    /// <summary>
+    /// Ce ai AZI în calendar. Singura parte a mesajului care privește înainte, nu înapoi —
+    /// de-aia stă la coadă și cu antet propriu. Doar pe briefingul zilnic.
+    /// </summary>
+    IReadOnlyList<CalendarEvent>? Agenda = null,
+    /// <summary>
+    /// Dacă titlurile din agendă se scriu ca atare. Ele conțin nume de clienți și adrese, iar
+    /// mesajul pleacă spre Telegram — pe false rămân orele și felul, fără cine și unde.
+    /// </summary>
+    bool AgendaTitles = true,
+    /// <summary>Cât apel video era PLANIFICAT în calendar, față de cât s-a măsurat efectiv.</summary>
+    double PlannedMeetingSeconds = 0,
+    int PlannedMeetingCount = 0,
+    /// <summary>Programări la o adresă: explică timpul planificat pe care calculatorul n-avea cum să-l vadă.</summary>
+    int PlannedInPersonCount = 0,
+    /// <summary>Evenimente pe care le tot împingi mai încolo. Doar pe briefingul zilnic.</summary>
+    IReadOnlyList<RescheduleAlert>? Postponed = null);
 
 /// <summary>
 /// Textul briefingului. Separat de trimitere ca să poată fi testat: compunerea e pură
@@ -56,6 +76,9 @@ public sealed record BriefingData(
 public static class BriefingComposer
 {
     private const int TopCount = 3;
+
+    /// <summary>Mai multe de-atât nu mai sunt un îndemn, sunt o listă de făcut.</summary>
+    private const int MaxPostponed = 5;
 
     private static readonly CultureInfo Ro = CultureInfo.GetCultureInfo("ro-RO");
 
@@ -187,7 +210,9 @@ public static class BriefingComposer
             sb.Append("\n\n").Append(d.Kind == BriefingPeriod.Day
                 ? "N-am înregistrat nimic ieri — nici pe calculator, nici pe telefon."
                 : "N-am înregistrat nimic în perioada asta — nici pe calculator, nici pe telefon.");
-            return sb.ToString() + PhoneHint(d);
+            // Agenda rămâne: o zi fără nimic măsurat, dar cu ședințe azi, e exact ziua în care
+            // mesajul trebuie să-ți spună ce urmează.
+            return sb.ToString() + Agenda(d) + Postponed(d) + PhoneHint(d);
         }
 
         // Totalul pe ambele dispozitive vine PRIMUL: e cifra care răspunde la „cât am stat în
@@ -215,16 +240,7 @@ public static class BriefingComposer
             Line(sb, "Neutru", d.NeutralSeconds, d.ActiveSeconds);
             Line(sb, "Neproductiv", d.UnproductiveSeconds, d.ActiveSeconds);
 
-            // Ședințele apar doar pe săptămână și lună: pe zi știi oricum că ai avut o ședință,
-            // iar întrebarea utilă („cât din săptămână s-a dus în ședințe") e una de perioadă.
-            if (d.Kind is BriefingPeriod.Week or BriefingPeriod.Month
-                && d.MeetingSeconds >= 60 && d.ActiveSeconds > 0)
-            {
-                sb.Append("\nȘedințe ").Append(Dur(d.MeetingSeconds))
-                  .Append(" (").Append(d.MeetingCount).Append(d.MeetingCount == 1 ? " ședință)" : " ședințe)")
-                  .Append(" · ").Append((int)Math.Round(d.MeetingSeconds / d.ActiveSeconds * 100))
-                  .Append("% din timpul pe calculator");
-            }
+            Meetings(sb, d);
 
             Top(sb, "Top activități productive", d.TopProductive);
             Top(sb, "Top activități neproductive", d.TopUnproductive);
@@ -250,7 +266,50 @@ public static class BriefingComposer
             Top(sb, "Top activități neproductive", d.PhoneTopUnproductive);
         }
 
-        return sb.ToString() + PhoneHint(d);
+        return sb.ToString() + Agenda(d) + Postponed(d) + PhoneHint(d);
+
+        // Cât s-a măsurat, față de cât era planificat. Pe zi, linia „ai avut ședințe" era o
+        // informație pe care o aveai oricum — de-aia lipsea. Cu planul din calendar alături
+        // devine altceva: „cât din ce ți-ai propus s-a și întâmplat".
+        static void Meetings(StringBuilder sb, BriefingData d)
+        {
+            var masurat = d.MeetingSeconds >= 60;
+            var planificat = d.PlannedMeetingSeconds >= 60;
+
+            if (d.Kind is BriefingPeriod.Day && !planificat) return;
+            if (!masurat && !planificat) return;
+
+            if (!masurat)
+            {
+                sb.Append("\nȘedințe — nimic măsurat, deși aveai ")
+                  .Append(Dur(d.PlannedMeetingSeconds)).Append(" planificate în calendar");
+            }
+            else
+            {
+                sb.Append("\nȘedințe ").Append(Dur(d.MeetingSeconds))
+                  .Append(" (").Append(d.MeetingCount).Append(d.MeetingCount == 1 ? " ședință)" : " ședințe)");
+                if (d.ActiveSeconds > 0)
+                    sb.Append(" · ").Append((int)Math.Round(d.MeetingSeconds / d.ActiveSeconds * 100))
+                      .Append("% din timpul pe calculator");
+
+                if (planificat)
+                {
+                    sb.Append("\nPlanificat în calendar ").Append(Dur(d.PlannedMeetingSeconds));
+                    // Sub cinci minute nu e o diferență, e rotunjire — iar o diferență raportată
+                    // acolo unde nu există te învață să nu mai crezi cifra.
+                    var delta = d.MeetingSeconds - d.PlannedMeetingSeconds;
+                    if (Math.Abs(delta) >= 300)
+                        sb.Append(delta > 0 ? $" · {Dur(delta)} peste plan" : $" · {Dur(-delta)} nu s-au regăsit");
+                }
+            }
+
+            // Explică de ce o parte din timpul planificat n-are corespondent măsurat: dacă te
+            // duci undeva, nu ești la calculator. Fără rândul ăsta, ar arăta a ședințe ratate.
+            if (d.PlannedInPersonCount > 0)
+                sb.Append("\n<i>Plus ").Append(d.PlannedInPersonCount)
+                  .Append(d.PlannedInPersonCount == 1 ? " programare la o adresă" : " programări la adrese")
+                  .Append(" — n-au cum să apară pe calculator.</i>");
+        }
 
         static void Line(StringBuilder sb, string label, double seconds, double total)
         {
@@ -266,6 +325,84 @@ public static class BriefingComposer
               .Append(string.Join("\n", items.Select(i => $"· {Esc(i.Name)} {Dur(i.Seconds)}")));
         }
     }
+
+    /// <summary>
+    /// Singura parte a mesajului care privește înainte, nu înapoi. De-aia stă la coadă și cu
+    /// antet propriu: restul briefingului spune „ieri", iar amestecul le-ar face neclare pe
+    /// amândouă. Doar pe briefingul zilnic — o agendă pe lună ar fi o listă, nu o informație.
+    /// </summary>
+    private static string Agenda(BriefingData d)
+    {
+        if (d.Kind != BriefingPeriod.Day || d.Agenda is null || d.Agenda.Count == 0) return "";
+
+        var apeluri = d.Agenda.Count(e => e.Kind == CalendarKind.Online);
+        var adrese = d.Agenda.Count(e => e.Kind == CalendarKind.InPerson);
+        // „Blocat" înseamnă că ai un angajament, nu că ai scris o notă. Un memento întins peste
+        // toată ziua — cum sunt cele de tip „plecat din oraș" — ar raporta paisprezece ore
+        // blocate lângă două apeluri de câte-o oră: aritmetic corect, ca informație fals.
+        var blocat = CalendarClassifier.UnionSeconds(
+            d.Agenda.Where(e => !e.AllDay && e.Kind != CalendarKind.Block));
+
+        var sb = new StringBuilder("\n\n<b>Azi în calendar</b>");
+
+        var sumar = new List<string>();
+        if (apeluri > 0) sumar.Add(apeluri == 1 ? "1 apel video" : $"{apeluri} apeluri video");
+        if (adrese > 0) sumar.Add(adrese == 1 ? "1 programare la o adresă" : $"{adrese} programări la adrese");
+        if (blocat >= 60) sumar.Add($"{Dur(blocat)} blocate");
+        if (sumar.Count > 0) sb.Append('\n').Append(string.Join(" · ", sumar));
+
+        foreach (var e in d.Agenda)
+        {
+            sb.Append("\n· ").Append(e.AllDay
+                ? "toată ziua"
+                : $"{e.Start.LocalDateTime:HH:mm}–{e.End.LocalDateTime:HH:mm}");
+            sb.Append(' ').Append(d.AgendaTitles ? Esc(e.Title) : Fel(e.Kind));
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Ce tot împingi mai încolo. Stă după agendă, pentru că e singura parte a mesajului care
+    /// cere ceva de la tine — restul doar raportează.
+    ///
+    /// Titlurile respectă același comutator ca agenda: fără ele rămâne numărul de mutări, care
+    /// e oricum informația care contează.
+    /// </summary>
+    private static string Postponed(BriefingData d)
+    {
+        if (d.Kind != BriefingPeriod.Day || d.Postponed is null || d.Postponed.Count == 0) return "";
+
+        var sb = new StringBuilder("\n\n<b>Tot amâni</b>");
+        foreach (var a in d.Postponed.Take(MaxPostponed))
+        {
+            sb.Append("\n· ")
+              .Append(d.AgendaTitles ? Esc(a.Title) : "un eveniment")
+              .Append(" — mutat de ").Append(Ori(a.Moves))
+              .Append(", acum pe ").Append(a.Start.ToString("d MMMM", Ro));
+        }
+        sb.Append(d.Postponed.Count == 1
+            ? "\n<i>Nu vrei să-l faci?</i>"
+            : "\n<i>Nu vrei să le faci?</i>");
+        return sb.ToString();
+    }
+
+    /// <summary>„de 3 ori" se citește prost în românește pentru numerele mici.</summary>
+    private static string Ori(int n) => n switch
+    {
+        2 => "două ori",
+        3 => "trei ori",
+        4 => "patru ori",
+        5 => "cinci ori",
+        _ => $"{n} ori",
+    };
+
+    /// <summary>Când titlurile sunt oprite, rămâne felul: ora și ce fel de lucru e, fără cine.</summary>
+    private static string Fel(CalendarKind k) => k switch
+    {
+        CalendarKind.Online => "apel video",
+        CalendarKind.InPerson => "programare la o adresă",
+        _ => "rezervat",
+    };
 
     /// <summary>
     /// Pe săptămână și pe lună, tăcerea ar fi înșelătoare: ai crede că n-ai stat pe telefon,

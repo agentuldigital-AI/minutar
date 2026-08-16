@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Hosting;
+using Tracker.Daemon.Calendar;
 using Tracker.Daemon.Coach;
 using Tracker.Daemon.Report;
 using Tracker.Shared.Config;
@@ -41,15 +42,19 @@ public sealed class BriefingService : BackgroundService
     private readonly DayStateStore _days;
     private readonly BriefingStateStore _state;
     private readonly TelegramClient _telegram;
+    private readonly GoogleCalendarClient _calendar;
+    private readonly RescheduleStore _reschedule = new();
 
     public BriefingService(ConfigProvider config, ReportService report, DayStateStore days,
-                           BriefingStateStore state, TelegramClient telegram)
+                           BriefingStateStore state, TelegramClient telegram,
+                           GoogleCalendarClient calendar)
     {
         _config = config;
         _report = report;
         _days = days;
         _state = state;
         _telegram = telegram;
+        _calendar = calendar;
     }
 
     protected override async Task ExecuteAsync(CancellationToken ct)
@@ -121,10 +126,14 @@ public sealed class BriefingService : BackgroundService
             Log.Warn("Briefing: media pe 7 zile a eșuat, trimit fără ea: " + ex.Message);
         }
 
-        return BriefingComposer.FromReport(
+        var data = BriefingComposer.FromReport(
             BriefingPeriod.Day,
             DateOnly.FromDateTime(today.AddDays(-1)), DateOnly.FromDateTime(today),
             day, week, WeekDays);
+
+        // Două ferestre diferite, dinadins: planul se compară cu IERI (ziua măsurată), iar
+        // agenda arată AZI — singurul lucru din mesaj pe care mai poți face ceva.
+        return await WithCalendarAsync(data, today.AddDays(-1), today, today, ct);
     }
 
     // ------------------------------------------------------ saptamanal / lunar
@@ -162,8 +171,93 @@ public sealed class BriefingService : BackgroundService
             Log.Warn($"Briefing {kind}: perioada de comparație a eșuat, trimit fără ea: {ex.Message}");
         }
 
-        return BriefingComposer.FromReport(
+        var data = BriefingComposer.FromReport(
             kind, DateOnly.FromDateTime(from), DateOnly.FromDateTime(to), cur, prev);
+
+        // Fără agendă pe perioadă: o listă cu o lună de evenimente n-ar fi o informație.
+        return await WithCalendarAsync(data, from, to, null, ct);
+    }
+
+    // --------------------------------------------------------------- calendar
+
+    /// <summary>
+    /// Pune peste cifrele măsurate ce spunea calendarul. Nu aruncă și nu blochează: dacă Google
+    /// tace, mesajul pleacă exact ca înainte. Un calendar picat n-are voie să oprească
+    /// briefingul — cifrele tale sunt deja în raport, calendarul e doar context.
+    /// </summary>
+    private async Task<BriefingData> WithCalendarAsync(
+        BriefingData data, DateTime from, DateTime to, DateTime? agendaFor, CancellationToken ct)
+    {
+        if (!_calendar.Configured()) return data;
+
+        var cfg = _config.Current.Calendar;
+        var planned = Planned(await ReadAsync(from, to, ct));
+
+        IReadOnlyList<CalendarEvent>? agenda = null;
+        IReadOnlyList<RescheduleAlert>? postponed = null;
+
+        if (agendaFor is { } zi)
+        {
+            // O SINGURĂ citire pentru amândouă: agenda e ziua de azi decupată din fereastra pe
+            // care oricum o parcurgem ca să vedem ce s-a mutat. Două cereri ar fi fost două
+            // ocazii de a pica, pentru aceleași date.
+            var zile = cfg.RescheduleAlerts ? Math.Max(1, cfg.RescheduleWindowDays) : 1;
+            var window = await ReadAsync(zi, zi.AddDays(zile), ct);
+
+            if (window is not null)
+            {
+                // suprapunere, nu egalitate de dată: un bloc început ieri și întins peste azi
+                // face parte din ziua ta, chiar dacă nu începe azi
+                var azi = window.Where(e => e.Start.LocalDateTime < zi.Date.AddDays(1)
+                                            && e.End.LocalDateTime > zi.Date)
+                                .OrderBy(e => e.Start).ToList();
+                if (azi.Count > 0)
+                {
+                    if (azi.Count > cfg.MaxAgendaItems)
+                        Log.Info($"Calendar: agenda de azi are {azi.Count} intrări, intră primele {cfg.MaxAgendaItems}.");
+                    agenda = azi.Take(cfg.MaxAgendaItems).ToList();
+                }
+
+                if (cfg.RescheduleAlerts)
+                {
+                    var (stare, alerte) = RescheduleTracker.Observe(
+                        _reschedule.Load(), window, DateOnly.FromDateTime(zi), cfg.RescheduleMoves);
+                    _reschedule.Save(stare);
+                    if (alerte.Count > 0)
+                    {
+                        Log.Info($"Calendar: {alerte.Count} evenimente mutate de cel puțin {cfg.RescheduleMoves} ori.");
+                        postponed = alerte;
+                    }
+                }
+            }
+        }
+
+        return data with
+        {
+            Agenda = agenda,
+            AgendaTitles = cfg.AgendaInBriefing,
+            PlannedMeetingSeconds = planned.Seconds,
+            PlannedMeetingCount = planned.Count,
+            PlannedInPersonCount = planned.InPerson,
+            Postponed = postponed,
+        };
+    }
+
+    private Task<List<CalendarEvent>?> ReadAsync(DateTime from, DateTime to, CancellationToken ct) =>
+        _calendar.ListAsync(ReportService.LocalMidnight(from), ReportService.LocalMidnight(to), ct);
+
+    /// <summary>
+    /// Numai apelurile video se compară cu ce a măsurat tracker-ul. Reuniune, nu sumă: două
+    /// apeluri suprapuse înseamnă tot o oră planificată. Programările la o adresă se numără
+    /// separat — sunt timp blocat, dar nu în fața calculatorului, deci absența lor din măsurători
+    /// nu e o ședință ratată.
+    /// </summary>
+    private static (double Seconds, int Count, int InPerson) Planned(IReadOnlyList<CalendarEvent>? evs)
+    {
+        if (evs is null) return (0, 0, 0);
+        var online = evs.Where(e => e.Kind == CalendarKind.Online && !e.AllDay).ToList();
+        return (CalendarClassifier.UnionSeconds(online), online.Count,
+                evs.Count(e => e.Kind == CalendarKind.InPerson && !e.AllDay));
     }
 
     /// <summary>Perioada ÎNCHEIATĂ dinaintea zilei curente, plus cea de dinaintea ei, pentru comparație.</summary>

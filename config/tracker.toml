@@ -127,6 +127,32 @@ domains        = ["meet.google.com", "whereby.com"]
 bridge_minutes = 25
 min_minutes    = 3
 
+# Google Calendar, citit printr-un cont de serviciu (identitate separata, care vede doar
+# calendarele partajate explicit cu ea). Cheia si adresa REALE nu se pun aici (fisierul e
+# in repo) — se pun in %LOCALAPPDATA%\TimeTracker\tracker.toml.
+#
+# meeting_hosts: semnalul „asta e sedinta" sta in campul LOCATIE, nu in lista de invitati.
+# Uneltele de rezervare pun linkul de apel in locatie si nu adauga niciun invitat, asa ca o
+# integrare care se ia dupa participanti rateaza exact sedintele de lucru.
+#
+# agenda_in_briefing: titlurile evenimentelor pleaca spre Telegram asa cum sunt, cu tot cu
+# nume de clienti si adrese. Pune-l pe false si primesti doar orele si numarul.
+[calendar]
+enabled                = false
+key_file               = ''
+calendar_id            = ""
+agenda_in_briefing     = true
+meeting_hosts          = ["zoom.us", "meet.google.com", "teams.microsoft.com", "teams.live.com", "whereby.com", "webex.com", "gotomeeting.com", "skype.com"]
+meeting_title_keywords = ["call", "meeting", "sedinta", "sync", "standup", "interview", "zoom", "meet", "apel", "discutie"]
+max_agenda_items       = 12
+timeout_seconds        = 15
+# „Ai mutat asta de trei ori." Seriile recurente sunt sarite: o sedinta saptamanala se muta
+# legitim in fiecare saptamana, iar raportata ca amanare ar aparea de cincizeci de ori pe an
+# si te-ar invata sa ignori mesajul. Se numara doar mutarile INAINTE, peste granita de zi.
+reschedule_alerts      = true
+reschedule_moves       = 3
+reschedule_window_days = 45
+
 # --- Proiectele tale: adaugă câte un bloc [[projects]] per proiect ------------------
 # keywords         = cuvinte din titlul ferestrei care atribuie timpul pe proiect
 # claude_dirs      = folderele în care rulezi Claude Code pentru acest proiect

@@ -30,6 +30,7 @@ public sealed class TrackerConfig
     public CoachConfig Coach { get; set; } = new();
     public TelegramConfig Telegram { get; set; } = new();
     public MeetingsConfig Meetings { get; set; } = new();
+    public CalendarConfig Calendar { get; set; } = new();
 
     public static TrackerConfig Load(string path)
     {
@@ -116,6 +117,12 @@ public sealed class TrackerConfig
         // Lipsa lor se tratează la rulare, cu un mesaj în log.
         Require(Telegram.BriefingDelaySeconds >= 0, "telegram.briefing_delay_seconds must be >= 0");
         Require(Meetings.BridgeMinutes >= 1, "meetings.bridge_minutes must be >= 1");
+        // Calea cheii și adresa calendarului lipsă NU sunt eroare, din același motiv ca la telegram.
+        Require(Calendar.MaxAgendaItems >= 1, "calendar.max_agenda_items must be >= 1");
+        Require(Calendar.TimeoutSeconds >= 1, "calendar.timeout_seconds must be >= 1");
+        // sub două mutări n-ai ce numi amânare — ai mutat ceva o dată, se întâmplă
+        Require(Calendar.RescheduleMoves >= 2, "calendar.reschedule_moves must be >= 2");
+        Require(Calendar.RescheduleWindowDays >= 1, "calendar.reschedule_window_days must be >= 1");
 
         static void Require(bool ok, string message)
         {
@@ -492,6 +499,71 @@ public sealed class MeetingsConfig
 
     /// <summary>Blocurile mai scurte de atât nu sunt ședințe — sunt clickuri rătăcite.</summary>
     public int MinMinutes { get; set; } = 3;
+}
+
+/// <summary>
+/// Google Calendar, citit printr-un cont de serviciu. Contul de serviciu e o identitate
+/// separată: nu moștenește nimic de la contul care l-a creat, ci vede exact calendarele care
+/// i-au fost partajate explicit, cu drept de citire. Alternativa („login cu Google") cere un
+/// flux prin browser și tokenuri de reîmprospătat, iar pe status „Testing" tokenul moare la
+/// 7 zile — cod care se strică tăcut peste luni.
+///
+/// Calea cheii și adresa calendarului stau doar în tracker.toml din %LOCALAPPDATA%, ca
+/// tokenul de Telegram: nu în repo, și neexpuse de GET /api/config.
+/// </summary>
+public sealed class CalendarConfig
+{
+    /// <summary>Comutatorul principal. Implicit oprit: fără cheie nu are ce citi.</summary>
+    public bool Enabled { get; set; }
+
+    /// <summary>Calea către JSON-ul contului de serviciu.</summary>
+    public string KeyFile { get; set; } = "";
+
+    /// <summary>Adresa calendarului partajat cu contul de serviciu.</summary>
+    public string CalendarId { get; set; } = "";
+
+    /// <summary>
+    /// Dacă agenda pleacă spre Telegram cu titluri întregi. Titlurile conțin nume de clienți și
+    /// adrese, iar un chat cu bot nu e criptat cap-la-cap — oprește-l și primești doar orele.
+    /// </summary>
+    public bool AgendaInBriefing { get; set; } = true;
+
+    /// <summary>
+    /// Gazde care înseamnă apel video. Semnalul stă în câmpul „locație", nu în invitați: uneltele
+    /// de rezervare pun linkul de apel acolo și nu adaugă niciun invitat, așa că o integrare care
+    /// se ia după lista de participanți ratează exact ședințele de lucru.
+    /// Din link se păstrează DOAR gazda — restul URL-ului conține id-ul ședinței.
+    /// </summary>
+    public List<string> MeetingHosts { get; set; } = new()
+    {
+        "zoom.us", "meet.google.com", "teams.microsoft.com", "teams.live.com",
+        "whereby.com", "webex.com", "gotomeeting.com", "skype.com",
+    };
+
+    /// <summary>
+    /// Plasa de siguranță pentru ședințele scrise de mână, care n-au nici link, nici invitați —
+    /// doar un titlu. Fără ea, ședințele trecute în calendar „din cap" nu s-ar vedea deloc.
+    /// </summary>
+    public List<string> MeetingTitleKeywords { get; set; } = new()
+    {
+        "call", "meeting", "ședință", "sedinta", "sync", "standup", "interview",
+        "zoom", "meet", "apel", "discuție", "discutie",
+    };
+
+    /// <summary>Câte intrări intră în agenda zilei, ca mesajul să rămână citibil pe telefon.</summary>
+    public int MaxAgendaItems { get; set; } = 12;
+
+    /// <summary>„Ai mutat asta de trei ori" — singura parte care se uită la ce faci cu planul.</summary>
+    public bool RescheduleAlerts { get; set; } = true;
+
+    /// <summary>De câte mutări înainte e nevoie ca un eveniment să merite pomenit.</summary>
+    public int RescheduleMoves { get; set; } = 3;
+
+    /// <summary>Cât de departe în viitor se caută evenimente de urmărit.</summary>
+    public int RescheduleWindowDays { get; set; } = 45;
+
+    /// <summary>Google răspunde în sub o secundă; peste atât, briefingul pleacă fără agendă.</summary>
+    public int TimeoutSeconds { get; set; } = 15;
 }
 
 internal static class TomlOptions

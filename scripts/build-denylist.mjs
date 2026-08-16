@@ -68,6 +68,16 @@ const GENERIC = new Set([
   // iar prezenta lor nu spune nimic despre nimeni anume
   "google", "apple", "microsoft", "timecamp", "rescuetime", "toggl", "clockify",
   "iustin", "aionese",
+  // furnizori de email si de infrastructura: apar in orice config care are un cont,
+  // iar domeniul in sine nu identifica pe nimeni — partea dinaintea lui @ o face.
+  "gmail.com", "outlook.com", "hotmail.com", "yahoo.com", "icloud.com", "proton.me",
+  "googleapis.com", "gserviceaccount.com", "oauth2.googleapis.com",
+  "calendar.google.com",
+  // gazdele de apel video: stau in config ca reguli de recunoastere, nu ca date despre tine.
+  // Lasate afara, garda ar tipa chiar la commitul care le adauga in sablon — exact felul de
+  // alarma falsa care te invata s-o ocolesti.
+  "zoom.us", "us02web.zoom.us", "us06web.zoom.us", "teams.microsoft.com", "teams.live.com",
+  "whereby.com", "webex.com", "gotomeeting.com", "skype.com", "hangouts.google.com",
 ]);
 
 // Un domeniu generic isi face generic si numele: daca „anthropic.com" e acceptat, atunci
@@ -110,6 +120,15 @@ for (const src of SOURCES) {
         if (!/^(c:|users|projects|personal|clients|home)$/i.test(seg)) add(seg, "cale claude");
       }
     }
+  }
+  // Adrese de email: intra in config odata cu calendarul, si sunt cel mai direct
+  // identificator din tot fisierul. Domeniul nu spune nimic — gmail.com il are jumatate
+  // de planeta, de-aia e printre GENERICE — dar partea dinaintea lui @ e unica si
+  // trebuie sa nu apara niciodata intr-un repo public. Pana la calendar, configul n-avea
+  // nicio adresa, deci tiparul asta lipsea cu totul: 0 din 152 de termeni o acopereau.
+  for (const m of toml.matchAll(/\b([a-z0-9._%+-]+)@([a-z0-9.-]+\.[a-z]{2,})\b/gi)) {
+    add(m[0], "email");
+    add(m[1], "email (nume)");
   }
   // orice domeniu care apare oriunde in config, chiar si in comentarii
   for (const m of toml.matchAll(/\b([a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)*\.(?:com|ro|eu|net|org|io|app|dev|tv|so|ai))\b/gi)) {

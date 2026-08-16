@@ -179,6 +179,14 @@ public static class BriefingComposer
             return sb.ToString() + PhoneHint(d);
         }
 
+        // Totalul pe ambele dispozitive vine PRIMUL: e cifra care răspunde la „cât am stat în
+        // fața unui ecran", iar la coada mesajului stătea exact acolo unde nu se citește. Apare
+        // doar când există date de pe ambele — altfel „calculator + telefon" ar minți despre ce
+        // însumează.
+        if (!nimicPePc && !nimicPeTelefon)
+            sb.Append("\n\n<b>Timp total ").Append(Dur(d.ActiveSeconds + d.PhoneMinutes * 60))
+              .Append("</b>\n<i>calculator + telefon</i>");
+
         // Un bloc per dispozitiv, cu clasele UNA PE RÂND. Pe un ecran de telefon, trei perechi
         // cifră-procent înșirate pe același rând se citesc greu; pe rânduri separate se compară
         // dintr-o privire.
@@ -218,9 +226,6 @@ public static class BriefingComposer
 
             Top(sb, "Top activități productive", d.PhoneTopProductive);
             Top(sb, "Top activități neproductive", d.PhoneTopUnproductive);
-
-            if (!nimicPePc)
-                sb.Append("\n\n<b>Împreună ").Append(Dur(d.ActiveSeconds + tot * 60)).Append("</b>");
         }
 
         return sb.ToString() + PhoneHint(d);

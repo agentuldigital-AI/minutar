@@ -185,13 +185,20 @@ public class BriefingComposerTests
         var text = BriefingComposer.Compose(Data(active: 2 * 3600, phoneMin: 60));
 
         Assert.Contains("<b>Telefon 1h 00m</b>", text);
-        Assert.Contains("<b>Împreună 3h 00m</b>", text);
+        Assert.Contains("<b>Timp total 3h 00m</b>", text);
+        Assert.Contains("calculator + telefon", text);
+        // totalul e PRIMUL, nu la coada
+        Assert.True(text.IndexOf("Timp total", StringComparison.Ordinal)
+                    < text.IndexOf("Calculator", StringComparison.Ordinal));
     }
 
     [Fact]
     public void FaraDateDeTelefon_NuInventeazaTotalulComun()
     {
-        Assert.DoesNotContain("Împreună", BriefingComposer.Compose(Data(phoneMin: 0)));
+        // fara telefon, „calculator + telefon" ar minti despre ce insumeaza
+        Assert.DoesNotContain("Timp total", BriefingComposer.Compose(Data(phoneMin: 0)));
+        Assert.DoesNotContain("Timp total", BriefingComposer.Compose(
+            Data(active: 0, prod: 0, neutral: 0, unprod: 0, phoneMin: 200)));
     }
 
     [Fact]
@@ -209,7 +216,7 @@ public class BriefingComposerTests
         Assert.Contains("Neproductiv 5h 00m (50%)", text);   // raportat la totalul TELEFONULUI
         Assert.Contains("Nedetaliat 2h 00m (20%)", text);
         Assert.Contains("MemeBox 5h 00m", text);
-        Assert.Contains("<b>Împreună 12h 00m</b>", text);
+        Assert.Contains("<b>Timp total 12h 00m</b>", text);
     }
 
     [Fact]

@@ -1,0 +1,38 @@
+# Plasa de siguranta pentru cazul in care cineva ocoleste hook-ul pre-push cu --no-verify.
+#
+# NU previne — cand ruleaza asta, codul e deja public. Rolul ei e sa faca ocolirea VIZIBILA:
+# pica workflow-ul, primesti email, si afli in minute in loc de peste o luna.
+#
+# Doua alegeri deliberate:
+#
+#  1. Detaliile nu se tiparesc (--quiet). Logurile unui repo public sunt publice: o
+#     constatare afisata aici ar publica exact ce a prins garda. Vezi ce anume rulandu-l
+#     local, unde logul e al tau.
+#
+#  2. Ruleaza FARA lista neagra, deci doar euristicile. Lista contine numele clientilor si
+#     serviciilor tale; ca s-o aiba CI-ul, ar trebui pusa intr-un secret GitHub — adica
+#     exact datele pe care le protejam ar pleca la un tert. Euristicile sunt oricum stratul
+#     care prinde scurgeri NOI, iar lista ramane la tine, in hook-ul local.
+#
+# Scaneaza tot arborele, nu doar ce s-a schimbat: lucrurile ratate azi erau vechi si
+# neatinse de niciun commit recent.
+
+name: privacy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Scanare date personale
+        run: |
+          EMPTY=$(git hash-object -t tree /dev/null)
+          node scripts/privacy-guard.mjs --range "$EMPTY..HEAD" --quiet

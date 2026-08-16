@@ -162,6 +162,24 @@ function scanDiff(diffArgs, terms) {
   return findings;
 }
 
+/**
+ * In CI, detaliile NU se tiparesc. Logurile unui repo public sunt publice, iar o constatare
+ * afisata acolo ar publica exact ce a prins garda — „durată reală: 543 min" intr-un log
+ * deschis e aceeasi scurgere, doar pe alt canal. CI-ul e o sarma de declansare, nu un
+ * raport: spune CATE si unde sa te uiti, iar detaliile le vezi rulandu-l local.
+ */
+function reportQuiet(findings) {
+  if (findings.length === 0) {
+    console.log("privacy check: curat");
+    return 0;
+  }
+  const files = new Set(findings.map((f) => f.where.split(":")[0]));
+  console.error(`privacy check: ${findings.length} constatări în ${files.size} locuri.`);
+  console.error("Detaliile NU se afișează aici — logul e public. Rulează local:");
+  console.error("  node scripts/privacy-guard.mjs --range $(git hash-object -t tree /dev/null)..HEAD");
+  return 1;
+}
+
 function report(findings, denyMissing) {
   if (denyMissing) {
     console.error(`\n  Notă: lista neagră lipsește (${DENYLIST_PATH}).`);
@@ -191,7 +209,8 @@ function report(findings, denyMissing) {
 }
 
 const { terms, missing } = loadDenylist();
-const argv = process.argv.slice(2);
+const argv = process.argv.slice(2).filter((a) => a !== "--quiet");
+const quiet = process.argv.includes("--quiet");
 let findings = [];
 
 if (argv[0] === "--worktree") {
@@ -222,4 +241,4 @@ if (argv[0] === "--worktree") {
   }
 }
 
-process.exit(report(findings, missing));
+process.exit(quiet ? reportQuiet(findings) : report(findings, missing));

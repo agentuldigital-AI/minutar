@@ -83,7 +83,8 @@ var claude = new ClaudeModule(config, windowStore, store, host);
 var report = new ReportService(store, config, host);
 var coach = new CoachEngine(config, engine, popupService, days, cfg.Server.BridgePort, store);
 using var telegram = new Tracker.Daemon.Briefing.TelegramClient();
-var briefing = new Tracker.Daemon.Briefing.BriefingService(config, report, days, telegram);
+var briefingState = new Tracker.Daemon.Briefing.BriefingStateStore();
+var briefing = new Tracker.Daemon.Briefing.BriefingService(config, report, days, briefingState, telegram);
 
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
@@ -129,9 +130,14 @@ app.MapPost("/coach/test", () =>
 
 // Briefing: previzualizare + trimitere la cerere, ca să nu fie nevoie de o repornire ca să-l testezi.
 // „preview" nu atinge Telegram și nu marchează ziua — doar arată textul.
-app.MapPost("/briefing/test", async (bool? preview, CancellationToken ct) =>
+app.MapPost("/briefing/test", async (bool? preview, string? kind, CancellationToken ct) =>
 {
-    var text = await briefing.ComposeAsync(ct);
+    var text = kind?.ToLowerInvariant() switch
+    {
+        "week" => await briefing.ComposePeriodAsync(Tracker.Daemon.Briefing.BriefingPeriod.Week, ct),
+        "month" => await briefing.ComposePeriodAsync(Tracker.Daemon.Briefing.BriefingPeriod.Month, ct),
+        _ => await briefing.ComposeAsync(ct),
+    };
     if (preview == true) return Results.Ok(new { sent = false, text });
 
     var t = config.Current.Telegram;
@@ -231,6 +237,13 @@ app.MapPost("/api/phone/usage", async (PhoneUsageDto req, CancellationToken ct) 
     }
 
     Log.Info($"Phone usage saved: {from}..{to} {req.TotalMinutes}m, {apps.Count} aplicații");
+
+    // Datele de telefon vin dintr-un import manual, deci nu pot fi așteptate la o oră fixă.
+    // Momentul importului E declanșatorul: ca să fi ajuns aici, aplicația merge deja.
+    // Fire-and-forget — un Telegram lent n-are voie să țină clientul în așteptare, iar
+    // metoda nu aruncă niciodată: importul e salvat oricum.
+    _ = briefing.OnPhoneImportedAsync(from, to, CancellationToken.None);
+
     return Results.Ok(new { saved = true, from = data["from"], to = data["to"], minutes = req.TotalMinutes });
 });
 

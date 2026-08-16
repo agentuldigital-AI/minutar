@@ -442,6 +442,15 @@ public sealed class TelegramConfig
     /// <summary>Briefingul de ieri, o singură dată pe zi, la pornirea daemonului.</summary>
     public bool DailyBriefing { get; set; } = true;
 
+    /// <summary>Rezumatul săptămânii încheiate, o singură dată per săptămână.</summary>
+    public bool WeeklyBriefing { get; set; } = true;
+
+    /// <summary>Rezumatul lunii încheiate, o singură dată per lună.</summary>
+    public bool MonthlyBriefing { get; set; } = true;
+
+    /// <summary>Sumarul perioadei, trimis în momentul în care imporți Screen Time.</summary>
+    public bool PhoneImportBriefing { get; set; } = true;
+
     /// <summary>Răgaz după pornire: bucket-urile se așază, iar rețeaua de după login vine târziu.</summary>
     public int BriefingDelaySeconds { get; set; } = 25;
 }

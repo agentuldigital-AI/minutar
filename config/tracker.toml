@@ -111,6 +111,9 @@ enabled                 = false
 bot_token               = ""
 chat_id                 = ""
 daily_briefing          = true
+weekly_briefing         = true
+monthly_briefing        = true
+phone_import_briefing   = true
 briefing_delay_seconds  = 25
 
 # --- Proiectele tale: adaugă câte un bloc [[projects]] per proiect ------------------

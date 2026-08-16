@@ -4,24 +4,40 @@ using System.Text.Json;
 
 namespace Tracker.Daemon.Briefing;
 
-/// <summary>Cifrele dintr-o zi, extrase din raport — atât cât încape într-un mesaj de telefon.</summary>
+/// <summary>Ce fel de interval rezumă mesajul. Schimbă doar antetul și eticheta comparației.</summary>
+public enum BriefingPeriod
+{
+    Day,
+    Week,
+    Month,
+    /// <summary>Trimis când tocmai ai importat date de telefon, pentru exact perioada importată.</summary>
+    PhoneImport,
+}
+
+/// <summary>Cifrele unui interval, atât cât încape într-un mesaj de telefon.</summary>
 public sealed record BriefingData(
-    DateOnly Day,
+    BriefingPeriod Kind,
+    DateOnly From,
+    /// <summary>Exclusiv, ca peste tot în rapoarte: [From, To).</summary>
+    DateOnly To,
     double ActiveSeconds,
     double ProductiveSeconds,
     double NeutralSeconds,
     double UnproductiveSeconds,
     double PhoneMinutes,
     IReadOnlyList<(string Name, double Seconds)> TopApps,
-    double WeekAverageSeconds);
+    /// <summary>Media zilnică anterioară (zi) sau totalul perioadei dinainte (săptămână/lună). 0 = se omite.</summary>
+    double CompareSeconds = 0,
+    /// <summary>Nu există date de telefon pentru interval — se cere un import, nu se tace.</summary>
+    bool PhoneMissing = false);
 
 /// <summary>
-/// Textul briefingului de dimineață. Separat de trimitere ca să poată fi testat: compunerea e
-/// pură (cifre → text), iar rețeaua stă în <see cref="TelegramClient"/>.
+/// Textul briefingului. Separat de trimitere ca să poată fi testat: compunerea e pură
+/// (cifre → text), iar rețeaua stă în <see cref="TelegramClient"/>.
 ///
-/// Raportul vine ca tip anonim din <c>ReportService.BuildAsync</c>, deci nu are membri accesibili
-/// din afară — îl citim prin JSON. Toate câmpurile sunt tratate ca opționale: un raport fără
-/// telefon sau fără aplicații produce un mesaj mai scurt, nu o excepție.
+/// Raportul vine ca tip anonim din <c>ReportService.BuildAsync</c>, deci nu are membri
+/// accesibili din afară — îl citim prin JSON. Toate câmpurile sunt tratate ca opționale: un
+/// raport fără telefon sau fără aplicații produce un mesaj mai scurt, nu o excepție.
 /// </summary>
 public static class BriefingComposer
 {
@@ -34,9 +50,11 @@ public static class BriefingComposer
     };
 
     /// <summary>Serializează raportul (tip anonim) și extrage doar ce intră în briefing.</summary>
-    public static BriefingData FromReport(DateOnly day, object dayReport, object? weekReport, int weekDays = 7)
+    public static BriefingData FromReport(
+        BriefingPeriod kind, DateOnly from, DateOnly to,
+        object report, object? compareReport = null, int compareDivisor = 1)
     {
-        using var doc = JsonDocument.Parse(JsonSerializer.Serialize(dayReport, ReportJson));
+        using var doc = JsonDocument.Parse(JsonSerializer.Serialize(report, ReportJson));
         var root = doc.RootElement;
 
         var totals = Obj(root, "totals");
@@ -54,52 +72,59 @@ public static class BriefingComposer
         }
 
         var phone = 0d;
+        var phoneMissing = true;
         if (root.TryGetProperty("phone", out var ph) && ph.ValueKind == JsonValueKind.Object)
-            phone = Num(ph, "totalMinutes");
-
-        var weekAvg = 0d;
-        if (weekReport is not null && weekDays > 0)
         {
-            using var wdoc = JsonDocument.Parse(JsonSerializer.Serialize(weekReport, ReportJson));
-            var wt = Obj(wdoc.RootElement, "totals");
-            if (wt is { }) weekAvg = Num(wt.Value, "activeSeconds") / weekDays;
+            phone = Num(ph, "totalMinutes");
+            // „lipsă" înseamnă că nu există NICIUN import care atinge intervalul, nu că e zero
+            phoneMissing = !(ph.TryGetProperty("periods", out var per)
+                             && per.ValueKind == JsonValueKind.Array
+                             && per.GetArrayLength() > 0);
+        }
+
+        var compare = 0d;
+        if (compareReport is not null && compareDivisor > 0)
+        {
+            using var cdoc = JsonDocument.Parse(JsonSerializer.Serialize(compareReport, ReportJson));
+            var ct = Obj(cdoc.RootElement, "totals");
+            if (ct is { }) compare = Num(ct.Value, "activeSeconds") / compareDivisor;
         }
 
         return new BriefingData(
-            day,
+            kind, from, to,
             totals is { } ? Num(totals.Value, "activeSeconds") : 0,
             byClass is { } ? Num(byClass.Value, "productive") : 0,
             byClass is { } ? Num(byClass.Value, "neutral") : 0,
             byClass is { } ? Num(byClass.Value, "unproductive") : 0,
-            phone,
-            apps,
-            weekAvg);
+            phone, apps, compare, phoneMissing);
     }
 
     /// <summary>Mesajul propriu-zis. HTML (parse_mode), cu tot ce vine din date escapat.</summary>
     public static string Compose(BriefingData d)
     {
         var sb = new StringBuilder();
-        sb.Append("<b>Ieri, ").Append(Esc(d.Day.ToString("dddd d MMMM", Ro))).Append("</b>");
+        sb.Append("<b>").Append(Esc(Header(d))).Append("</b>");
 
         var nimicPePc = d.ActiveSeconds < 60;
         var nimicPeTelefon = d.PhoneMinutes < 1;
 
         if (nimicPePc && nimicPeTelefon)
         {
-            sb.Append("\n\nN-am înregistrat nimic ieri — nici pe calculator, nici pe telefon.");
-            return sb.ToString();
+            sb.Append("\n\n").Append(d.Kind == BriefingPeriod.Day
+                ? "N-am înregistrat nimic ieri — nici pe calculator, nici pe telefon."
+                : "N-am înregistrat nimic în perioada asta — nici pe calculator, nici pe telefon.");
+            return sb.ToString() + PhoneHint(d);
         }
 
         if (nimicPePc)
         {
-            sb.Append("\n\nPe calculator, nimic înregistrat ieri.");
+            sb.Append("\n\nPe calculator, nimic înregistrat.");
         }
         else
         {
             sb.Append("\n\nActiv <b>").Append(Dur(d.ActiveSeconds)).Append("</b>");
-            if (d.WeekAverageSeconds >= 60)
-                sb.Append(" — media ultimelor 7 zile: ").Append(Dur(d.WeekAverageSeconds));
+            if (d.CompareSeconds >= 60)
+                sb.Append(" — ").Append(CompareLabel(d.Kind)).Append(": ").Append(Dur(d.CompareSeconds));
 
             var clase = new List<string>();
             Add(clase, "Productiv", d.ProductiveSeconds, d.ActiveSeconds);
@@ -109,13 +134,17 @@ public static class BriefingComposer
         }
 
         if (!nimicPeTelefon)
+        {
             sb.Append("\nTelefon ").Append(Dur(d.PhoneMinutes * 60));
+            if (!nimicPePc)
+                sb.Append(" · împreună <b>").Append(Dur(d.ActiveSeconds + d.PhoneMinutes * 60)).Append("</b>");
+        }
 
         if (d.TopApps.Count > 0)
             sb.Append("\n\nTop: ")
               .Append(string.Join(" · ", d.TopApps.Select(a => $"{Esc(a.Name)} {Dur(a.Seconds)}")));
 
-        return sb.ToString();
+        return sb.ToString() + PhoneHint(d);
 
         static void Add(List<string> into, string label, double seconds, double total)
         {
@@ -124,6 +153,41 @@ public static class BriefingComposer
             into.Add($"{label} {Dur(seconds)} ({pct}%)");
         }
     }
+
+    /// <summary>
+    /// Pe săptămână și pe lună, tăcerea ar fi înșelătoare: ai crede că n-ai stat pe telefon,
+    /// când de fapt n-ai importat încă. Zilnicul nu cere nimic — Screen Time vine pe săptămâni.
+    /// </summary>
+    private static string PhoneHint(BriefingData d) =>
+        d.PhoneMissing && d.Kind is BriefingPeriod.Week or BriefingPeriod.Month
+            ? "\n\n<i>Telefonul lipsește din interval — importă Screen Time din pagina Telefon și îți trimit totalul.</i>"
+            : "";
+
+    private static string Header(BriefingData d)
+    {
+        var last = d.To.AddDays(-1); // To e exclusiv; ultima zi din interval
+        return d.Kind switch
+        {
+            BriefingPeriod.Day => $"Ieri, {d.From.ToString("dddd d MMMM", Ro)}",
+            BriefingPeriod.Week => $"Săptămâna trecută, {Span(d.From, last)}",
+            BriefingPeriod.Month => $"Luna trecută, {d.From.ToString("MMMM yyyy", Ro)}",
+            _ => $"Telefon importat, {Span(d.From, last)}",
+        };
+    }
+
+    /// <summary>„10–16 august", iar peste graniță de lună „28 iulie – 3 august".</summary>
+    private static string Span(DateOnly a, DateOnly b) =>
+        a.Month == b.Month
+            ? $"{a.Day}–{b.Day} {a.ToString("MMMM", Ro)}"
+            : $"{a.ToString("d MMMM", Ro)} – {b.ToString("d MMMM", Ro)}";
+
+    private static string CompareLabel(BriefingPeriod k) => k switch
+    {
+        BriefingPeriod.Day => "media ultimelor 7 zile",
+        BriefingPeriod.Week => "săptămâna dinainte",
+        BriefingPeriod.Month => "luna dinainte",
+        _ => "perioada dinainte",
+    };
 
     /// <summary>Format scurt, cum se citește pe telefon: „{h}h {mm}m", iar sub o oră doar „{m}m".</summary>
     public static string Dur(double seconds)

@@ -151,6 +151,9 @@ public static class ConfigWriter
         sb.AppendLine($"bot_token               = {Q(c.Telegram.BotToken)}");
         sb.AppendLine($"chat_id                 = {Q(c.Telegram.ChatId)}");
         sb.AppendLine($"daily_briefing          = {(c.Telegram.DailyBriefing ? "true" : "false")}");
+        sb.AppendLine($"weekly_briefing         = {(c.Telegram.WeeklyBriefing ? "true" : "false")}");
+        sb.AppendLine($"monthly_briefing        = {(c.Telegram.MonthlyBriefing ? "true" : "false")}");
+        sb.AppendLine($"phone_import_briefing   = {(c.Telegram.PhoneImportBriefing ? "true" : "false")}");
         sb.AppendLine($"briefing_delay_seconds  = {c.Telegram.BriefingDelaySeconds}");
 
         foreach (var p in c.Projects)

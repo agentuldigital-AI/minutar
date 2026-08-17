@@ -99,7 +99,33 @@ builder.Services.AddHostedService(_ => claude);
 builder.Services.AddHostedService(_ => coach);
 builder.Services.AddHostedService(_ => briefing);
 builder.Services.AddHostedService(_ => new Tracker.Daemon.Storage.BackupService(eventStore));
+builder.Services.AddHostedService(_ => new Tracker.Daemon.Diagnostics.LatencyProbe());
 var app = builder.Build();
+
+// Cronometrul cererilor. Singur, timpul total nu spune nimic — o secundă poate fi un handler
+// greu sau o cerere care a asteptat un fir liber. Alaturi de intarzierea de planificare
+// masurata de LatencyProbe, raspunsul e direct, si scris in log fara sa fie nevoie sa prinzi
+// pana in flagrant. Vezi comentariul din LatencyProbe pentru de ce a fost nevoie.
+app.Use(async (ctx, next) =>
+{
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+    try
+    {
+        await next();
+    }
+    finally
+    {
+        var ms = (int)sw.ElapsedMilliseconds;
+        var delay = Tracker.Daemon.Diagnostics.LatencyProbe.LastDelayMs;
+        var verdict = Tracker.Daemon.Diagnostics.LatencyProbe.Verdict(ms, delay);
+        if (verdict != Tracker.Daemon.Diagnostics.LatencyVerdict.Ok)
+        {
+            Log.Warn($"[lat] {ctx.Request.Path} {ms}ms — " +
+                     Tracker.Daemon.Diagnostics.LatencyProbe.Describe(verdict) +
+                     $" (planificare {delay}ms, in coada {ThreadPool.PendingWorkItemCount})");
+        }
+    }
+});
 
 // aw-server /api/0 compat shim + parity tee (plan M2/M4)
 Tracker.Daemon.Storage.StorageEndpoints.Map(app, eventStore, host, cfg.Storage.TeeAwUrl, pause);

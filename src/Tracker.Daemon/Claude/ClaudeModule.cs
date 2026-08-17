@@ -16,8 +16,8 @@ namespace Tracker.Daemon.Claude;
 ///    counted regardless of focus;
 ///  - claude-attention: emitted while the desktop app is the foreground window AND a
 ///    last-interacted session exists (UserPromptSubmit / Notification);
-///  - fallback: jsonl mtime watcher on ~/.claude/projects (folder = encoded cwd,
-///    filename = session_id) for sessions whose hooks don't fire.
+///  - fallback: scanare periodică a mtime-urilor din ~/.claude/projects (folder = encoded cwd,
+///    filename = session_id) pentru sesiunile ale căror hook-uri nu se declanșează.
 /// </summary>
 public sealed class ClaudeModule : BackgroundService
 {
@@ -38,7 +38,6 @@ public sealed class ClaudeModule : BackgroundService
     // dialogul de adopție din dashboard să poată precompleta claude_dirs. In-memory:
     // se repopulează de la primul hook/jsonl al sesiunii după restart.
     private readonly Dictionary<string, string> _unmappedCwd = new(StringComparer.OrdinalIgnoreCase);
-    private FileSystemWatcher? _jsonlWatcher;
     private string _projectsDir = "";
     private DateTimeOffset _lastAttention;
 
@@ -74,14 +73,14 @@ public sealed class ClaudeModule : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
         _ = EnsureBucketsAsync(ct); // in parallel — events queue in the resilient client until ready
-        StartJsonlFallback();
-        Log.Info("Claude module running (hooks endpoint + jsonl fallback, attention tick 1s)");
+        Log.Info("Claude module running (hooks endpoint + scanare jsonl la 10s, attention tick 1s)");
 
         while (!ct.IsCancellationRequested)
         {
             try
             {
                 await AttentionTickAsync(ct);
+                ScanJsonl();
             }
             catch (OperationCanceledException)
             {
@@ -101,7 +100,6 @@ public sealed class ClaudeModule : BackgroundService
                 break;
             }
         }
-        _jsonlWatcher?.Dispose();
     }
 
     private async Task EnsureBucketsAsync(CancellationToken ct)
@@ -149,63 +147,79 @@ public sealed class ClaudeModule : BackgroundService
 
     // --- jsonl mtime fallback (research §6) ---------------------------------
 
-    private void StartJsonlFallback()
+    /// <summary>
+    /// Scanează mtime-urile transcriptelor, în loc să asculte notificări de fișier.
+    ///
+    /// A fost un FileSystemWatcher recursiv, și a trebuit schimbat: Claude Code scrie în
+    /// transcript continuu cât produce text, iar fiecare scriere ridica notificări duse pe fire
+    /// din pool. La o sesiune lungă — a fost măsurată una de peste 50 MB — potopul de notificări
+    /// înfometa exact pool-ul din care serverul HTTP își ia firele.
+    ///
+    /// Costul unei verificări nu depinde de CÂT se scrie, ci doar de câte fișiere există — o
+    /// enumerare de metadate, la câteva secunde. Fallback-ul n-are nevoie de precizie mai bună:
+    /// e plasa pentru sesiunile ale căror hook-uri nu se declanșează, iar acolo contează că
+    /// timpul se vede, nu că se vede în aceeași secundă.
+    /// </summary>
+    private static readonly TimeSpan JsonlScanEvery = TimeSpan.FromSeconds(10);
+
+    private DateTimeOffset _lastJsonlScan;
+    private readonly Dictionary<string, DateTime> _jsonlSeenMtime = new(StringComparer.OrdinalIgnoreCase);
+
+    private void ScanJsonl()
     {
         var cfg = _config.Current;
         if (!cfg.Claude.JsonlFallback) return;
+
+        var now = DateTimeOffset.UtcNow;
+        if (now - _lastJsonlScan < JsonlScanEvery) return;
+        _lastJsonlScan = now;
+
         // projects_dir gol în config = locația standard a transcriptelor Claude Code
         _projectsDir = string.IsNullOrWhiteSpace(cfg.Claude.ProjectsDir)
             ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude", "projects")
             : cfg.Claude.ProjectsDir;
-        if (!Directory.Exists(_projectsDir))
-        {
-            Log.Warn($"Claude projects dir not found ({_projectsDir}) — jsonl fallback off");
-            return;
-        }
+        if (!Directory.Exists(_projectsDir)) return;
 
-        _jsonlWatcher = new FileSystemWatcher(_projectsDir, "*.jsonl")
+        foreach (var path in Directory.EnumerateFiles(_projectsDir, "*.jsonl", SearchOption.AllDirectories))
         {
-            IncludeSubdirectories = true,
-            NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size,
-        };
-        _jsonlWatcher.Changed += OnJsonl;
-        _jsonlWatcher.Created += OnJsonl;
-        _jsonlWatcher.EnableRaisingEvents = true;
-    }
-
-    private void OnJsonl(object sender, FileSystemEventArgs e)
-    {
-        try
-        {
-            var sessionId = Path.GetFileNameWithoutExtension(e.Name ?? "");
-            // the encoded cwd is always the FIRST folder under projects_dir — deeper
-            // levels are subagent/workflow transcripts belonging to the same project
-            var rel = Path.GetRelativePath(_projectsDir, e.FullPath);
-            if (rel.StartsWith("..", StringComparison.Ordinal)) return;
-            var encodedDir = rel.Split('\\', '/')[0];
-            if (sessionId.Length == 0 || encodedDir.Length == 0) return;
-
-            var now = DateTimeOffset.UtcNow;
-            string? cached;
-            lock (_lock)
+            try
             {
-                if (_jsonlLastSent.TryGetValue(sessionId, out var at) && now - at < JsonlMinInterval) return;
-                _jsonlLastSent[sessionId] = now;
-                _sessionProject.TryGetValue(sessionId, out cached);
-            }
+                var mtime = File.GetLastWriteTimeUtc(path);
+                // prima scanare doar reține pozițiile: la pornire, toate fișierele ar părea
+                // proaspete, iar daemonul ar emite muncă pentru sesiuni închise de săptămâni
+                var stiut = _jsonlSeenMtime.TryGetValue(path, out var vazut);
+                _jsonlSeenMtime[path] = mtime;
+                if (!stiut || mtime <= vazut) continue;
 
-            // resolve the REAL cwd from the transcript itself, so the jsonl fallback produces
-            // the SAME project name as the hooks (no more encoded-dir pseudo-projects)
-            var project = cached ?? TryReadCwdProject(e.FullPath) ?? MapEncodedDir(encodedDir);
-            lock (_lock)
-            {
-                _sessionProject[sessionId] = project;
+                var sessionId = Path.GetFileNameWithoutExtension(path);
+                // cwd-ul codificat e mereu PRIMUL folder sub projects_dir — nivelurile mai
+                // adânci sunt transcripte de subagent din același proiect
+                var rel = Path.GetRelativePath(_projectsDir, path);
+                if (rel.StartsWith("..", StringComparison.Ordinal)) continue;
+                var encodedDir = rel.Split('\\', '/')[0];
+                if (sessionId.Length == 0 || encodedDir.Length == 0) continue;
+
+                string? cached;
+                lock (_lock)
+                {
+                    if (_jsonlLastSent.TryGetValue(sessionId, out var at) && now - at < JsonlMinInterval) continue;
+                    _jsonlLastSent[sessionId] = now;
+                    _sessionProject.TryGetValue(sessionId, out cached);
+                }
+
+                // cwd-ul REAL se citește din transcript, ca fallback-ul să producă ACELAȘI nume
+                // de proiect ca hook-urile (fără pseudo-proiecte din folderul codificat)
+                var project = cached ?? TryReadCwdProject(path) ?? MapEncodedDir(encodedDir);
+                lock (_lock)
+                {
+                    _sessionProject[sessionId] = project;
+                }
+                EmitWork(project, sessionId);
             }
-            EmitWork(project, sessionId);
-        }
-        catch (Exception ex)
-        {
-            Log.Warn("jsonl fallback event failed: " + ex.Message);
+            catch (Exception ex)
+            {
+                Log.Warn("jsonl fallback scan failed: " + ex.Message);
+            }
         }
     }
 

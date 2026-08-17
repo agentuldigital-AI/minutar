@@ -13,15 +13,27 @@
  * care apar legitim in orice repo public. Fara scaderea aia, garda ar tipa la fiecare push
  * si ai invata s-o ocolesti, ceea ce ar anula-o complet.
  *
+ * RULEAZA SINGUR inaintea fiecarui push: garda il cheama, ca un client aparut in calendar de
+ * la ultimul push sa fie cunoscut fara sa-si aminteasca nimeni sa dea o comanda. Lista se
+ * ADUNA peste cea existenta, deci un push fara internet nu o saraceste.
+ *
  *   node scripts/build-denylist.mjs            # scrie lista
  *   node scripts/build-denylist.mjs --dry-run  # doar arata ce ar scrie
+ *   node scripts/build-denylist.mjs --fresh    # reconstruieste de la zero, fara mostenire
+ *   node scripts/build-denylist.mjs --quiet    # o singura linie (cum o cheama garda)
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync, renameSync } from "node:fs";
 import { homedir } from "node:os";
 import { createSign } from "node:crypto";
 import { execSync } from "node:child_process";
 import path from "node:path";
+
+/** Rulat din hook-ul de pre-push: doar o linie de rezumat, nu tot inventarul. */
+const quiet = process.argv.includes("--quiet");
+
+/** Info se tace in quiet; AVERTISMENTELE nu — o lista neimprospatata trebuie sa se vada. */
+const info = (...a) => { if (!quiet) console.log(...a); };
 
 const LOCAL = process.env.LOCALAPPDATA || path.join(homedir(), "AppData", "Local");
 const OUT = process.env.TRACKER_PRIVACY_DENYLIST ||
@@ -205,6 +217,8 @@ async function calendarToken(keyFile) {
       grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
       assertion: `${head}.${body}.${sig}`,
     }),
+    // ruleaza inaintea fiecarui push: o retea care atarna n-are voie sa-ti blocheze pushul
+    signal: AbortSignal.timeout(NET_TIMEOUT),
   });
   const j = await res.json();
   return j.access_token || null;
@@ -227,6 +241,10 @@ function calendarConfig(toml) {
 
 const CAL_BACK_DAYS = 180;
 const CAL_FWD_DAYS = 90;
+
+/** Rulam inaintea fiecarui push, deci reteaua nu are voie sa tina ostatic pushul. */
+const NET_TIMEOUT = 10_000;
+
 const raportate = [];
 
 async function harvestCalendar() {
@@ -247,7 +265,10 @@ async function harvestCalendar() {
     const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(cfg.calendarId)}/events`
       + `?timeMin=${encodeURIComponent(from)}&timeMax=${encodeURIComponent(to)}`
       + "&singleEvents=true&maxResults=2500";
-    const res = await fetch(url, { headers: { authorization: `Bearer ${tok}` } });
+    const res = await fetch(url, {
+      headers: { authorization: `Bearer ${tok}` },
+      signal: AbortSignal.timeout(NET_TIMEOUT),
+    });
     if (!res.ok) { console.log(`  (calendar: citirea a esuat, ${res.status}, sar)`); return; }
     items = (await res.json()).items || [];
   } catch (e) {
@@ -289,10 +310,35 @@ async function harvestCalendar() {
     }
     if (e.organizer?.displayName) harvestText(e.organizer.displayName, "organizator");
   }
-  console.log(`  (calendar: ${items.length} evenimente citite)`);
+  info(`  (calendar: ${items.length} evenimente citite)`);
 }
 
 await harvestCalendar();
+
+// ------------------------------------------------------- reuniune cu ce era
+//
+// Lista nu se rescrie de la zero, se ADUNA peste cea veche. Doua motive, si al doilea e cel
+// care conteaza de cand generatorul ruleaza automat inainte de fiecare push:
+//
+// 1. Un client cu care nu mai lucrezi ramane un om al carui nume n-are ce cauta intr-un repo
+//    public. Iesirea lui din calendar nu-l face public.
+// 2. Un push fara internet nu poate citi calendarul. Fara reuniune, ar rescrie lista FARA
+//    termenii de acolo, si ai ramane cu o garda mai slaba fara sa afli — exact felul de
+//    esec tacut pe care garda exista ca sa-l previna.
+//
+// GENERICELE se scad si din mostenire, ca reglajele de zgomot sa aiba efect si retroactiv.
+// `--fresh` reconstruieste de la zero, pentru cand chiar vrei sa scapi de termeni vechi.
+if (!process.argv.includes("--fresh") && existsSync(OUT)) {
+  let mostenite = 0;
+  for (const line of readFileSync(OUT, "utf8").split(/\r?\n/)) {
+    const t = line.trim();
+    if (!t || t.startsWith("#") || found.has(t)) continue;
+    if (tooWeak(t) || isGeneric(t)) continue;
+    found.set(t, "mostenit");
+    mostenite++;
+  }
+  if (mostenite) info(`  (${mostenite} termeni pastrati din lista anterioara)`);
+}
 
 const terms = [...found.keys()].sort((a, b) => a.localeCompare(b, "ro"));
 const header = `# GENERAT de scripts/build-denylist.mjs — nu edita de mana, se suprascrie.
@@ -315,12 +361,20 @@ if (process.argv.includes("--dry-run")) {
   console.log(`# ${terms.length} termeni (dry-run, nu am scris nimic)`);
 } else {
   mkdirSync(path.dirname(OUT), { recursive: true });
-  writeFileSync(OUT, header + body, "utf8");
-  console.log(`${terms.length} termeni scrisi in ${OUT}`);
-  const byWhy = new Map();
-  for (const why of found.values()) byWhy.set(why, (byWhy.get(why) || 0) + 1);
-  for (const [why, n] of [...byWhy].sort((a, b) => b[1] - a[1])) console.log(`  ${why}: ${n}`);
-  raportSarite();
+  // scriere in doi timpi: un fisier taiat la jumatate de o intrerupere ar insemna o lista
+  // mai scurta, adica o garda mai slaba — si nimic nu te-ar anunta
+  const tmp = OUT + ".tmp";
+  writeFileSync(tmp, header + body, "utf8");
+  renameSync(tmp, OUT);
+  if (quiet) {
+    console.log(`lista neagra: ${terms.length} termeni`);
+  } else {
+    console.log(`${terms.length} termeni scrisi in ${OUT}`);
+    const byWhy = new Map();
+    for (const why of found.values()) byWhy.set(why, (byWhy.get(why) || 0) + 1);
+    for (const [why, n] of [...byWhy].sort((a, b) => b[1] - a[1])) console.log(`  ${why}: ${n}`);
+    raportSarite();
+  }
 }
 
 /**

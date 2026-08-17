@@ -32,6 +32,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const DENYLIST_PATH =
   process.env.TRACKER_PRIVACY_DENYLIST ||
@@ -87,7 +88,33 @@ const ALWAYS = [
 const git = (args) =>
   execFileSync("git", args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
 
+/**
+ * Reface lista inainte de scanare, ca sa cunoasca oamenii aparuti in calendar de la ultimul
+ * push. Fara asta, un client nou ramanea nestiut pana cand cineva isi amintea sa ruleze
+ * generatorul de mana — adica exact felul de pas pe care nu-l face nimeni.
+ *
+ * Nu poate strica nimic daca esueaza: generatorul aduna peste lista existenta, nu o rescrie,
+ * deci un push fara internet foloseste ce era. Iar aici orice eroare se inghite — o garda care
+ * BLOCHEAZA pushul fiindca n-a putut citi calendarul ar fi mai enervanta decat utila, si primul
+ * lucru pe care l-ai face ar fi s-o ocolesti.
+ */
+function refreshDenylist() {
+  if (process.argv.includes("--no-refresh")) return;
+  const gen = path.join(path.dirname(fileURLToPath(import.meta.url)), "build-denylist.mjs");
+  if (!existsSync(gen)) return;
+  try {
+    const out = execFileSync(process.execPath, [gen, "--quiet"], {
+      encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "pipe"],
+    });
+    process.stderr.write(out.trim() ? `  ${out.trim()}\n` : "");
+  } catch (e) {
+    // afisam, dar nu oprim: lista veche e valida, doar poate nu contine ultimii veniti
+    process.stderr.write(`  (lista neagra n-a putut fi improspatata: ${e.message.split("\n")[0]})\n`);
+  }
+}
+
 function loadDenylist() {
+  refreshDenylist();
   if (!existsSync(DENYLIST_PATH)) return { terms: [], missing: true };
   const terms = readFileSync(DENYLIST_PATH, "utf8")
     .split(/\r?\n/)

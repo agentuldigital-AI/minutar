@@ -202,6 +202,47 @@ public class CalendarUnionTests
 }
 
 /// <summary>
+/// Podeaua de oră a briefingului.
+///
+/// Descoperită pe viu: o instalare rulată seara târziu repornește daemonul, briefingul pleacă
+/// la 00:04 — ora la care dormi — ȘI marchează ziua ca trimisă, deci dimineața nu mai vine
+/// nimic. Pierdeai briefingul exact în ziua în care actualizai aplicația.
+/// </summary>
+public class MorningWaitTests
+{
+    private static DateTimeOffset La(int h, int m = 0) =>
+        new(new DateTime(2026, 8, 17, h, m, 0, DateTimeKind.Unspecified),
+            TimeZoneInfo.Local.GetUtcOffset(new DateTime(2026, 8, 17, h, m, 0, DateTimeKind.Unspecified)));
+
+    [Fact]
+    public void PornireLaMiezulNoptii_AsteaptaPanaDimineata()
+    {
+        Assert.Equal(TimeSpan.FromMinutes(6 * 60 + 56), BriefingService.MorningWait(La(0, 4), 7));
+    }
+
+    [Fact]
+    public void PornireDupaOra_NuAsteaptaDeloc()
+    {
+        // e o podea, nu o programare: dacă te așezi la birou la 9, îl primești la 9
+        Assert.Equal(TimeSpan.Zero, BriefingService.MorningWait(La(9), 7));
+        Assert.Equal(TimeSpan.Zero, BriefingService.MorningWait(La(23, 30), 7));
+    }
+
+    [Fact]
+    public void FixLaOra_NuAsteapta()
+    {
+        Assert.Equal(TimeSpan.Zero, BriefingService.MorningWait(La(7), 7));
+    }
+
+    [Fact]
+    public void OraZero_OpresteRegula()
+    {
+        // pentru cine chiar vrea comportamentul vechi
+        Assert.Equal(TimeSpan.Zero, BriefingService.MorningWait(La(3), 0));
+    }
+}
+
+/// <summary>
 /// „Ai mutat asta de trei ori."
 ///
 /// Regula fără de care ar fi zgomot: seriile recurente NU se pun la socoteală. O ședință

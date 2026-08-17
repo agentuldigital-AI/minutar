@@ -155,6 +155,7 @@ public static class ConfigWriter
         sb.AppendLine($"monthly_briefing        = {(c.Telegram.MonthlyBriefing ? "true" : "false")}");
         sb.AppendLine($"phone_import_briefing   = {(c.Telegram.PhoneImportBriefing ? "true" : "false")}");
         sb.AppendLine($"briefing_delay_seconds  = {c.Telegram.BriefingDelaySeconds}");
+        sb.AppendLine($"earliest_hour           = {c.Telegram.EarliestHour}");
 
         sb.AppendLine();
         sb.AppendLine("[meetings]");

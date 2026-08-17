@@ -115,6 +115,11 @@ weekly_briefing         = true
 monthly_briefing        = true
 phone_import_briefing   = true
 briefing_delay_seconds  = 25
+# Ora de la care are voie sa plece un briefing (0 = oricand). Nu e o programare, e o podea:
+# daca pornesti la 9, il primesti la 9. Exista pentru ca „la pornire" e un inlocuitor pentru
+# „cand te asezi la birou" — iar o repornire de la o instalare la miezul noptii nu e asta, si
+# ar consuma ziua trimitand la o ora la care dormi.
+earliest_hour           = 7
 
 # Sedintele video. Semnalul e TITLUL ferestrei, nu simpla prezenta a procesului: aplicatiile
 # de apel scriu altceva in titlu cand esti intr-un apel fata de cand sunt doar deschise. Fara

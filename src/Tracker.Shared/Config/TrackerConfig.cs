@@ -116,6 +116,7 @@ public sealed class TrackerConfig
         // aici ar păstra tăcut configul vechi (ConfigProvider), iar tu ai crede că ai salvat.
         // Lipsa lor se tratează la rulare, cu un mesaj în log.
         Require(Telegram.BriefingDelaySeconds >= 0, "telegram.briefing_delay_seconds must be >= 0");
+        Require(Telegram.EarliestHour is >= 0 and <= 23, "telegram.earliest_hour must be 0-23");
         Require(Meetings.BridgeMinutes >= 1, "meetings.bridge_minutes must be >= 1");
         // Calea cheii și adresa calendarului lipsă NU sunt eroare, din același motiv ca la telegram.
         Require(Calendar.MaxAgendaItems >= 1, "calendar.max_agenda_items must be >= 1");
@@ -462,6 +463,17 @@ public sealed class TelegramConfig
 
     /// <summary>Răgaz după pornire: bucket-urile se așază, iar rețeaua de după login vine târziu.</summary>
     public int BriefingDelaySeconds { get; set; } = 25;
+
+    /// <summary>
+    /// Ora de la care are voie să plece un briefing (0 = oricând).
+    ///
+    /// „La pornire" e un înlocuitor pentru „când te așezi la birou". O repornire venită dintr-o
+    /// instalare sau o actualizare la miezul nopții nu e asta: mesajul pleacă la o oră la care
+    /// dormi ȘI consumă ziua, deci dimineața nu mai primești nimic. Sub ora asta se așteaptă.
+    ///
+    /// Nu e o programare la oră fixă — e o podea. Dacă te așezi la birou la 9, îl primești la 9.
+    /// </summary>
+    public int EarliestHour { get; set; } = 7;
 }
 
 /// <summary>

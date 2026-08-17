@@ -72,6 +72,15 @@ public sealed class BriefingService : BackgroundService
             // răgaz după login: bucket-urile se inițializează în fundal, iar rețeaua vine mai târziu
             await Task.Delay(TimeSpan.FromSeconds(Math.Max(0, cfg.BriefingDelaySeconds)), ct);
 
+            // ...iar dacă pornirea a fost în toiul nopții, mai așteptăm până la o oră la care
+            // mesajul chiar ajunge la cineva treaz. Vezi MorningWait.
+            var asteapta = MorningWait(DateTimeOffset.Now, cfg.EarliestHour);
+            if (asteapta > TimeSpan.Zero)
+            {
+                Log.Info($"Briefing: pornire la o oră prea devreme, aștept {asteapta.TotalMinutes:F0} min.");
+                await Task.Delay(asteapta, ct);
+            }
+
             if (cfg.DailyBriefing) await DailyAsync(ct);
             if (cfg.WeeklyBriefing) await PeriodAsync(BriefingPeriod.Week, ct);
             if (cfg.MonthlyBriefing) await PeriodAsync(BriefingPeriod.Month, ct);
@@ -258,6 +267,27 @@ public sealed class BriefingService : BackgroundService
         var online = evs.Where(e => e.Kind == CalendarKind.Online && !e.AllDay).ToList();
         return (CalendarClassifier.UnionSeconds(online), online.Count,
                 evs.Count(e => e.Kind == CalendarKind.InPerson && !e.AllDay));
+    }
+
+    /// <summary>
+    /// Cât mai are de așteptat un briefing pornit prea devreme. Zero = poate pleca acum.
+    ///
+    /// Motivul e o scăpare descoperită pe viu: o instalare rulată seara târziu repornește
+    /// daemonul, briefingul pleacă la 00:04 — ora la care dormi — ȘI marchează ziua ca trimisă,
+    /// deci dimineața nu mai vine nimic. Pierdeai briefingul exact în ziua în care actualizai
+    /// aplicația.
+    ///
+    /// E o PODEA, nu o programare la oră fixă: dacă pornești calculatorul la 9, îl primești la
+    /// 9, nu se așteaptă nimic. Se așteaptă doar când ai pornit înaintea ei.
+    ///
+    /// Pură și publică pentru că e singura parte cu reguli — restul e Task.Delay.
+    /// </summary>
+    public static TimeSpan MorningWait(DateTimeOffset now, int earliestHour)
+    {
+        if (earliestHour <= 0 || now.Hour >= earliestHour) return TimeSpan.Zero;
+        var target = now.Date.AddHours(earliestHour);
+        var wait = target - now.DateTime;
+        return wait > TimeSpan.Zero ? wait : TimeSpan.Zero;
     }
 
     /// <summary>Perioada ÎNCHEIATĂ dinaintea zilei curente, plus cea de dinaintea ei, pentru comparație.</summary>

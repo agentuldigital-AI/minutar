@@ -180,6 +180,16 @@ for (const src of SOURCES) {
  * alarme false dintr-un singur termen, exact cum s-a intamplat prima data. Comparat ca subsir,
  * dispare de la sursa.
  */
+/**
+ * Diacriticele nu au voie sa conteze la comparatie. „Inchis" dintr-un titlu de calendar si
+ * „inchis" scris cu diacritice in cod sunt acelasi cuvant, dar ca siruri sunt diferite — iar
+ * fara pliere cuvantul intra in lista si garda tipa la fiecare commit care-l foloseste normal.
+ */
+const fold = (s) => s.toLowerCase()
+  .replace(/[ăâàáä]/g, "a").replace(/[îíì]/g, "i").replace(/[șş]/g, "s")
+  .replace(/[țţ]/g, "t").replace(/[éèê]/g, "e").replace(/[óöô]/g, "o")
+  .replace(/[úüû]/g, "u");
+
 function repoText() {
   let files = [];
   try {
@@ -194,7 +204,7 @@ function repoText() {
     if (/wwwroot[\\/]assets|package-lock\.json|\.(png|jpg|ico|dll|exe|zip|pdf)$/i.test(f)) continue;
     try {
       if (statSync(f).size > 2 * 1024 * 1024) continue;
-      parts.push(readFileSync(f, "utf8").toLowerCase());
+      parts.push(fold(readFileSync(f, "utf8")));
     } catch { /* binar sau ilizibil */ }
   }
   return parts.join("\n");
@@ -239,6 +249,17 @@ function calendarConfig(toml) {
   return { enabled, keyFile: val("key_file"), calendarId: val("calendar_id") };
 }
 
+/**
+ * Un termen care apare deja in codul propriu n-are ce cauta in lista: ar da alarme false la
+ * fiecare push care foloseste cuvantul normal. Se calculeaza o singura data, si doar cand chiar
+ * e nevoie — citirea intregului arbore nu merita facuta degeaba inaintea fiecarui push.
+ */
+let _cod = null;
+const inCod = (s) => {
+  _cod ??= repoText();
+  return _cod.length > 0 && _cod.includes(fold(s));
+};
+
 const CAL_BACK_DAYS = 180;
 const CAL_FWD_DAYS = 90;
 
@@ -276,11 +297,7 @@ async function harvestCalendar() {
     return;
   }
 
-  const cod = repoText();
   const MAJ = /[A-ZĂÂÎȘȚ][\wĂÂÎȘȚăâîșț-]*/g;
-
-  /** Un termen care apare deja in codul propriu n-are ce cauta in lista: ar da alarme false. */
-  const inCod = (s) => cod.length > 0 && cod.includes(s.toLowerCase());
 
   const pune = (s, why) => {
     if (!s || tooWeak(s) || isGeneric(s)) return;
@@ -334,6 +351,9 @@ if (!process.argv.includes("--fresh") && existsSync(OUT)) {
     const t = line.trim();
     if (!t || t.startsWith("#") || found.has(t)) continue;
     if (tooWeak(t) || isGeneric(t)) continue;
+    // aceeasi masura ca la termenii noi: daca apare in codul propriu, e zgomot, nu paza —
+    // iar daca e un NUME, apare in raportul de mai jos, unde se vede ca a ajuns in repo
+    if (inCod(t)) { raportate.push(t); continue; }
     found.set(t, "mostenit");
     mostenite++;
   }

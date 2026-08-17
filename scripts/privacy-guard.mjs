@@ -100,10 +100,23 @@ function loadDenylist() {
 const isProse = (line) =>
   /^\s*(\/\/|\/\*|\*|#|<!--|--)/.test(line) || /^\s*\/{3}/.test(line);
 
+/**
+ * Fara separatoare: „doula-lavie", „doula_lavie", „doula.lavie" si „Doula Lavie" devin toate
+ * acelasi sir. Exista pentru o scapare reala — un nume de client scris cu cratima intr-un
+ * comentariu a trecut nevazut, desi era in lista fara cratima. Numele nu-si schimba natura
+ * dupa cum il despici.
+ */
+const desparte = (s) => s.toLowerCase().replace(/[\s\-_.]+/g, "");
+
 function scanText(text, terms, { prose = false } = {}) {
   const hits = [];
+  const jos = text.toLowerCase();
+  const lipit = desparte(text);
   for (const t of terms) {
-    if (text.toLowerCase().includes(t.toLowerCase())) {
+    // termenii foarte scurti nu se caută lipit: fără separatoare, granițele dispar și un
+    // fragment de patru litere s-ar aprinde din două cuvinte alăturate întâmplător
+    const lipitOk = t.replace(/[\s\-_.]+/g, "").length >= 6 && lipit.includes(desparte(t));
+    if (jos.includes(t.toLowerCase()) || lipitOk) {
       hits.push({ kind: "listă neagră", detail: t });
     }
   }

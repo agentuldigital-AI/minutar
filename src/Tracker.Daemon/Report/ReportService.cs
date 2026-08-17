@@ -1156,7 +1156,7 @@ public sealed class ReportService
         }
 
         // second pass: fold leftover encoded names into their friendly twin (hooks used the
-        // cwd basename, jsonl used the encoded path — "C--…-doula-lavie" endsWith "-doula-lavie")
+        // cwd basename, jsonl used the encoded path — "C--…-nume-proiect" endsWith "-nume-proiect")
         var friendly = result.Keys.Where(k => !k.StartsWith("C--", StringComparison.OrdinalIgnoreCase)).ToList();
         foreach (var enc in result.Keys.Where(k => k.StartsWith("C--", StringComparison.OrdinalIgnoreCase)).ToList())
         {

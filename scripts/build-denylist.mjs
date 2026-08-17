@@ -17,8 +17,10 @@
  *   node scripts/build-denylist.mjs --dry-run  # doar arata ce ar scrie
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
+import { createSign } from "node:crypto";
+import { execSync } from "node:child_process";
 import path from "node:path";
 
 const LOCAL = process.env.LOCALAPPDATA || path.join(homedir(), "AppData", "Local");
@@ -141,11 +143,163 @@ for (const src of SOURCES) {
   }
 }
 
+// ---------------------------------------------------------------- calendarul
+//
+// Configul acopera ce ai clasificat tu. Calendarul acopera pe CINE cunosti — clienti cu care
+// ai doar sedinte, un doctor, o programare la o adresa. Nimic din alea nu apare in config,
+// deci pana acum garda nu le stia: singura protectie era ca nu le scrie nimeni in cod. Adica
+// disciplina, nu mecanism.
+//
+// Capcana, si de-aia codul de mai jos nu e o simpla adunare de cuvinte: titlurile de sedinte
+// sunt pline de cuvinte care apar legitim in cod — Video, Status, Title, Review, Start.
+// Adaugate ca termeni, garda ar tipa la fiecare push si te-ar invata s-o ocolesti.
+//
+// Deci: frazele intregi si sirurile de 2+ cuvinte cu majuscula intra direct (un nume propriu
+// aproape niciodata nu apare in cod). Un cuvant singur intra doar daca NU e deja in codul
+// propriu. Iar cand e — cazul in care numele a ajuns deja in repo — nu se sare in tacere, se
+// RAPORTEAZA: ala nu e un termen de sarit, e o scurgere de investigat.
+
+/**
+ * Tot textul urmarit de git, intr-o singura bucata, cu litere mici.
+ *
+ * De ce textul intreg si nu o lista de cuvinte: garda cauta SUBSIRURI, deci scaderea trebuie
+ * sa foloseasca aceeasi masura. Un cuvant de cinci litere dintr-un titlu de calendar care
+ * incepe cu „retur" nu e cuvant in cod, dar se aprinde in fiecare `return` din script — 15
+ * alarme false dintr-un singur termen, exact cum s-a intamplat prima data. Comparat ca subsir,
+ * dispare de la sursa.
+ */
+function repoText() {
+  let files = [];
+  try {
+    files = execSync("git ls-files", { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 })
+      .split(/\r?\n/).filter(Boolean);
+  } catch {
+    return ""; // rulat in afara unui repo — atunci nu scadem nimic
+  }
+  const parts = [];
+  for (const f of files) {
+    // bundle-ul minificat si lock-urile ar aduce megabytes fara sens
+    if (/wwwroot[\\/]assets|package-lock\.json|\.(png|jpg|ico|dll|exe|zip|pdf)$/i.test(f)) continue;
+    try {
+      if (statSync(f).size > 2 * 1024 * 1024) continue;
+      parts.push(readFileSync(f, "utf8").toLowerCase());
+    } catch { /* binar sau ilizibil */ }
+  }
+  return parts.join("\n");
+}
+
+/** Token de acces pentru contul de serviciu. Acelasi mecanism ca in daemon, fara pachete. */
+async function calendarToken(keyFile) {
+  const k = JSON.parse(readFileSync(keyFile, "utf8"));
+  const b64 = (o) => Buffer.from(typeof o === "string" ? o : JSON.stringify(o)).toString("base64url");
+  const now = Math.floor(Date.now() / 1000);
+  const head = b64({ alg: "RS256", typ: "JWT" });
+  const body = b64({
+    iss: k.client_email, scope: "https://www.googleapis.com/auth/calendar.readonly",
+    aud: k.token_uri, iat: now, exp: now + 3600,
+  });
+  const sig = createSign("RSA-SHA256").update(`${head}.${body}`).sign(k.private_key).toString("base64url");
+  const res = await fetch(k.token_uri, {
+    method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      assertion: `${head}.${body}.${sig}`,
+    }),
+  });
+  const j = await res.json();
+  return j.access_token || null;
+}
+
+/** Secțiunea [calendar] din TOML, fara sa aducem un parser intreg pentru trei chei. */
+function calendarConfig(toml) {
+  const i = toml.indexOf("\n[calendar]");
+  if (i < 0) return null;
+  const rest = toml.slice(i + 1);
+  const end = rest.indexOf("\n[", 1);
+  const sect = end < 0 ? rest : rest.slice(0, end);
+  const val = (key) => {
+    const m = sect.match(new RegExp(`^\\s*${key}\\s*=\\s*(?:'([^']*)'|"([^"]*)")`, "m"));
+    return m ? (m[1] ?? m[2] ?? "").trim() : "";
+  };
+  const enabled = /^\s*enabled\s*=\s*true/m.test(sect);
+  return { enabled, keyFile: val("key_file"), calendarId: val("calendar_id") };
+}
+
+const CAL_BACK_DAYS = 180;
+const CAL_FWD_DAYS = 90;
+const raportate = [];
+
+async function harvestCalendar() {
+  const src = SOURCES.find((s) => existsSync(s));
+  if (!src) return;
+  const cfg = calendarConfig(readFileSync(src, "utf8"));
+  if (!cfg || !cfg.enabled || !cfg.keyFile || !cfg.calendarId) return;
+
+  const keyFile = cfg.keyFile.replace(/%(\w+)%/g, (_, v) => process.env[v] || "");
+  if (!existsSync(keyFile)) { console.log("  (calendar: cheia nu exista la calea din config, sar)"); return; }
+
+  let items;
+  try {
+    const tok = await calendarToken(keyFile);
+    if (!tok) { console.log("  (calendar: Google a refuzat cheia, sar)"); return; }
+    const from = new Date(Date.now() - CAL_BACK_DAYS * 864e5).toISOString();
+    const to = new Date(Date.now() + CAL_FWD_DAYS * 864e5).toISOString();
+    const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(cfg.calendarId)}/events`
+      + `?timeMin=${encodeURIComponent(from)}&timeMax=${encodeURIComponent(to)}`
+      + "&singleEvents=true&maxResults=2500";
+    const res = await fetch(url, { headers: { authorization: `Bearer ${tok}` } });
+    if (!res.ok) { console.log(`  (calendar: citirea a esuat, ${res.status}, sar)`); return; }
+    items = (await res.json()).items || [];
+  } catch (e) {
+    console.log("  (calendar: nu am putut citi, sar —", e.message, ")");
+    return;
+  }
+
+  const cod = repoText();
+  const MAJ = /[A-ZĂÂÎȘȚ][\wĂÂÎȘȚăâîșț-]*/g;
+
+  /** Un termen care apare deja in codul propriu n-are ce cauta in lista: ar da alarme false. */
+  const inCod = (s) => cod.length > 0 && cod.includes(s.toLowerCase());
+
+  const pune = (s, why) => {
+    if (!s || tooWeak(s) || isGeneric(s)) return;
+    if (inCod(s)) { raportate.push(s); return; }
+    add(s, why);
+  };
+
+  /** Fraza intreaga + sirurile de 2+ cuvinte cu majuscula + cuvintele singure sigure. */
+  const harvestText = (text, why) => {
+    const t = (text || "").replace(/https?:\/\/\S+/g, " ").replace(/\s+/g, " ").trim();
+    if (!t) return;
+    if (t.includes(" ")) pune(t, why);
+
+    // siruri consecutive: „Nume Client SRL" ca intreg
+    for (const r of t.match(/(?:[A-ZĂÂÎȘȚ][\wĂÂÎȘȚăâîșț-]*(?:\s+|$)){2,}/g) || [])
+      pune(r.trim(), why + " (nume)");
+
+    for (const m of t.matchAll(MAJ)) pune(m[0], why + " (cuvant)");
+  };
+
+  for (const e of items) {
+    harvestText(e.summary, "calendar");
+    if (e.location && !/https?:\/\//i.test(e.location)) harvestText(e.location, "calendar (loc)");
+    for (const a of e.attendees || []) {
+      if (a.displayName) harvestText(a.displayName, "invitat");
+      if (a.email) { pune(a.email, "invitat (email)"); pune(a.email.split("@")[0], "invitat (nume)"); }
+    }
+    if (e.organizer?.displayName) harvestText(e.organizer.displayName, "organizator");
+  }
+  console.log(`  (calendar: ${items.length} evenimente citite)`);
+}
+
+await harvestCalendar();
+
 const terms = [...found.keys()].sort((a, b) => a.localeCompare(b, "ro"));
 const header = `# GENERAT de scripts/build-denylist.mjs — nu edita de mana, se suprascrie.
 #
-# Sursa: configul real (${SOURCES.length} fisier(e)). Termenii globali sunt scazuti,
-# ca garda sa nu tipe la fiecare push si sa te invete s-o ocolesti.
+# Sursa: configul real (${SOURCES.length} fisier(e)) plus calendarul, cand e configurat.
+# Termenii globali sunt scazuti, ca garda sa nu tipe la fiecare push si sa te invete
+# s-o ocolesti.
 #
 # FISIERUL ASTA NU AJUNGE NICIODATA INTR-UN REPO: contine exact numele pe care le
 # protejeaza. Pus in repo-ul public, ar publica ce trebuia sa ascunda.
@@ -166,4 +320,20 @@ if (process.argv.includes("--dry-run")) {
   const byWhy = new Map();
   for (const why of found.values()) byWhy.set(why, (byWhy.get(why) || 0) + 1);
   for (const [why, n] of [...byWhy].sort((a, b) => b[1] - a[1])) console.log(`  ${why}: ${n}`);
+  raportSarite();
+}
+
+/**
+ * Cuvintele din calendar care apar DEJA in codul propriu nu se pot pune in lista: ar face garda
+ * sa tipe la fiecare push. Dar nici nu se sar in tacere — printre ele, majoritatea sunt cuvinte
+ * obisnuite („Programare", „Discutie"), insa un NUME aparut aici inseamna ca a ajuns deja in
+ * repo. De-aia se afiseaza: e singurul loc din care poti afla asta.
+ */
+function raportSarite() {
+  const u = [...new Set(raportate)].sort((a, b) => a.localeCompare(b, "ro"));
+  if (u.length === 0) return;
+  console.log(`\n  ${u.length} cuvinte din calendar apar deja in codul propriu, deci nu au intrat`);
+  console.log("  in lista (ar da alarme false). Majoritatea sunt cuvinte obisnuite — dar daca");
+  console.log("  vezi un NUME printre ele, a ajuns deja in repo si trebuie scos:");
+  console.log("    " + u.join(", "));
 }
